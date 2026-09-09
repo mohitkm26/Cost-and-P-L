@@ -373,11 +373,16 @@ document.getElementById('file-ship').addEventListener('change', async (e)=>{
     const headerCols = {};
     HEADERS.forEach(h=>{ const src = Object.keys(SHIP_COL_TO_HEADER).find(hc=>SHIP_COL_TO_HEADER[hc]===h); headerCols[h] = keys.find(k=> normHeader(k)===src); });
 
-    const shipmentRows = [], costRows = [];
+    // De-duplicate by shipment_id (and shipment_id+header for costs) BEFORE upserting —
+    // Postgres upsert rejects a batch that touches the same conflict-key row twice.
+    // Later rows in the file win over earlier ones with the same key.
+    const shipmentMap = new Map(), costMap = new Map();
+    let duplicateShipmentRows = 0;
     raw.forEach(row=>{
       if(!row[shipCol]) return;
       const shipmentId = String(row[shipCol]).trim();
-      shipmentRows.push({
+      if(shipmentMap.has(shipmentId)) duplicateShipmentRows++;
+      shipmentMap.set(shipmentId, {
         shipment_id: shipmentId,
         lob: lobCol ? String(row[lobCol]).trim() : null,
         node: nodeCol ? String(row[nodeCol]) : null,
@@ -389,12 +394,16 @@ document.getElementById('file-ship').addEventListener('change', async (e)=>{
         const col = headerCols[h];
         if(col!==undefined && row[col]!=='' && row[col]!==undefined){
           const v = num(row[col]);
-          if(!isNaN(v)) costRows.push({shipment_id:shipmentId, header:h, amount:v, source_file:file.name});
+          if(!isNaN(v)) costMap.set(`${shipmentId}|${h}`, {shipment_id:shipmentId, header:h, amount:v, source_file:file.name});
         }
       });
     });
+    const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()];
+    if(duplicateShipmentRows){
+      document.getElementById('ship-status').textContent = `Note: ${duplicateShipmentRows} shipment ID(s) appeared more than once in this file — kept the last occurrence for each, discarded the earlier ones. Worth checking the source export for why.`;
+    }
 
-    document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…`;
+    document.getElementById('ship-status').textContent += (duplicateShipmentRows?' ':'') + `Saving ${shipmentRows.length} shipments…`;
     for(const chunk of chunkArray(shipmentRows, 500)){
       const { error } = await sbClient.from('shipments').upsert(chunk, {onConflict:'shipment_id'});
       if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
