@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cost Subledger — Phase 1 Pilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+  :root{
+    --bg:#EEF1EE; --panel:#FFFFFF; --ink:#15211D; --sub:#5B6660;
+    --line:#D6DBD4; --line-strong:#B7BEB6;
+    --teal:#0F6E5C; --teal-dim:#E4EFEC;
+    --amber:#B8791A; --amber-dim:#F7ECDA;
+    --red:#A63A3A; --red-dim:#F6E4E2;
+    --slate-dim:#EBEDEA;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;}
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+  header.top{ padding:20px 30px 16px; border-bottom:1px solid var(--line-strong); display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  header.top h1{ font-size:19px; font-weight:600; margin:0; letter-spacing:-0.01em;}
+  header.top .tag{ color:var(--sub); font-size:12.5px; margin-top:2px;}
+  header.top .right{ display:flex; align-items:center; gap:12px; }
+  header.top .phase{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--teal); border:1px solid var(--teal); padding:3px 8px; border-radius:3px;}
+  header.top .who{ font-size:12px; color:var(--sub); }
+  nav.steps{ display:flex; gap:2px; padding:0 30px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto;}
+  nav.steps button{ background:none; border:none; padding:12px 14px; font-family:'IBM Plex Sans'; font-size:13px; color:var(--sub); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;}
+  nav.steps button.active{ color:var(--ink); border-bottom:2px solid var(--teal); font-weight:600;}
+  nav.steps button:hover{ color:var(--ink); }
+  main{ padding:24px 30px 60px; max-width:1360px; margin:0 auto;}
+  .tabpanel{ display:none; } .tabpanel.active{ display:block; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:900px){ .grid2{ grid-template-columns:1fr; } }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:16px 18px; }
+  .panel + .panel{ margin-top:14px; }
+  .panel h2{ font-size:14px; font-weight:600; margin:0 0 4px; }
+  .panel .desc{ color:var(--sub); font-size:12px; margin:0 0 12px; }
+  .subblock{ border-top:1px solid var(--line); padding-top:12px; margin-top:12px; } .subblock:first-of-type{ border-top:none; padding-top:0; margin-top:0; }
+  .subblock h3{ font-size:12.5px; font-weight:600; margin:0 0 8px; color:var(--ink);}
+  .subblock h3 .badge{ font-family:'IBM Plex Mono'; font-size:10px; color:var(--teal); border:1px solid var(--teal); border-radius:3px; padding:1px 6px; margin-left:8px; font-weight:500;}
+  label.field{ display:block; font-size:11.5px; color:var(--sub); margin:8px 0 3px; }
+  input[type=text], input[type=number], input[type=email], input[type=password], select{ width:100%; font-family:'IBM Plex Mono', monospace; font-size:12px; padding:6px 8px; border:1px solid var(--line-strong); border-radius:3px; background:#FBFCFB; color:var(--ink);}
+  input[type=file]{ font-size:12px; }
+  button.btn{ font-family:'IBM Plex Sans'; font-size:12px; font-weight:600; padding:7px 13px; background:var(--ink); color:#fff; border:none; border-radius:3px; cursor:pointer;}
+  button.btn.secondary{ background:#fff; color:var(--ink); border:1px solid var(--line-strong); }
+  button.btn.teal{ background:var(--teal); }
+  button.btn-sm{ font-size:11px; padding:5px 9px; }
+  button.btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .row-actions{ display:flex; gap:8px; margin-top:9px; flex-wrap:wrap; }
+  .note{ font-size:11px; color:var(--sub); background:var(--slate-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-top:9px;}
+  .note.integration{ background:var(--teal-dim); border-color:var(--teal); color:#0B4A3E; }
+  .note.err{ background:var(--red-dim); border-color:var(--red); color:var(--red); }
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  table.data th{ text-align:left; font-weight:600; font-size:10.5px; color:var(--sub); padding:7px 9px; border-bottom:1px solid var(--line-strong); background:#FAFBFA; position:sticky; top:0;}
+  table.data td{ padding:6px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.data tbody tr:hover{ background:#FAFBF9; }
+  .num{ font-family:'IBM Plex Mono'; text-align:right; white-space:nowrap; }
+  .tablewrap{ max-height:440px; overflow:auto; border:1px solid var(--line); border-radius:4px; margin-top:9px;}
+  .status-pill{ display:inline-block; font-family:'IBM Plex Mono'; font-size:10px; font-weight:600; padding:2px 7px; border-radius:3px; white-space:nowrap;}
+  .status-matched{ background:var(--teal-dim); color:var(--teal); }
+  .status-pending{ background:var(--slate-dim); color:var(--sub); }
+  .status-review{ background:var(--amber-dim); color:var(--amber); }
+  .status-exception{ background:var(--red-dim); color:var(--red); }
+  .status-info{ background:var(--slate-dim); color:var(--sub); }
+  .ledgerstrip{ display:flex; border:1px solid var(--line-strong); border-radius:4px; background:var(--panel); margin-bottom:18px; overflow-x:auto;}
+  .ledgerstrip .cell{ flex:1; padding:14px 18px; border-right:1px solid var(--line); min-width:150px;}
+  .ledgerstrip .cell:last-child{ border-right:none; }
+  .ledgerstrip .cell .lab{ font-size:10.5px; color:var(--sub); margin-bottom:5px;}
+  .ledgerstrip .cell .val{ font-family:'IBM Plex Mono'; font-size:20px; font-weight:600;}
+  .ledgerstrip .cell .val.neg{ color:var(--red);} .ledgerstrip .cell .val.pos{ color:var(--teal);}
+  .toolbar{ display:flex; gap:9px; align-items:center; margin-bottom:9px; flex-wrap:wrap;}
+  .toolbar input, .toolbar select{ width:auto; }
+  .invgroup{ border:1px solid var(--line); border-radius:4px; padding:9px 11px; margin-bottom:9px;}
+  .invgroup .hd{ display:flex; justify-content:space-between; align-items:center; }
+  .invgroup .hd .name{ font-weight:600; font-size:12.5px; }
+  .invgroup .files{ margin-top:5px; font-size:11px; color:var(--sub);}
+  .invgroup .files span{ display:inline-block; background:var(--slate-dim); border-radius:3px; padding:2px 7px; margin:2px 4px 0 0; font-family:'IBM Plex Mono';}
+  .emptystate{ padding:22px; text-align:center; color:var(--sub); font-size:12.5px; border:1px dashed var(--line-strong); border-radius:4px;}
+  .small{ font-size:11px; color:var(--sub); }
+  #login-screen{ min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  #login-screen .box{ background:var(--panel); border:1px solid var(--line-strong); border-radius:6px; padding:32px 34px; width:340px; }
+  #login-screen h1{ font-size:17px; margin:0 0 4px; }
+  #login-screen p{ color:var(--sub); font-size:12.5px; margin:0 0 18px; }
+  #app-screen{ display:none; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="box">
+    <h1>Cost Subledger</h1>
+    <p>Phase 1 pilot — sign in with the account your Finance lead set up in Supabase.</p>
+    <label class="field">Email</label>
+    <input type="email" id="login-email" placeholder="you@xindus.net">
+    <label class="field">Password</label>
+    <input type="password" id="login-password">
+    <button class="btn teal" id="btn-login" style="margin-top:14px; width:100%;">Sign in</button>
+    <div id="login-error" class="note err" style="display:none;"></div>
+  </div>
+</div>
+
+<div id="app-screen">
+<header class="top">
+  <div>
+    <h1>Cost Subledger — Reconciliation &amp; Provisioning</h1>
+    <div class="tag">Provisional vs. actual, accounting movements, and shipment P&amp;L</div>
+  </div>
+  <div class="right">
+    <span class="who" id="who-label"></span>
+    <button class="btn secondary btn-sm" id="btn-logout">Sign out</button>
+    <div class="phase">PHASE 1 PILOT</div>
+  </div>
+</header>
+
+<nav class="steps">
+  <button data-tab="sources" class="active">1 · Sources</button>
+  <button data-tab="mapping">2 · Charge code mapping</button>
+  <button data-tab="reconcile">3 · Reconciliation</button>
+  <button data-tab="accounting">4 · Accounting</button>
+  <button data-tab="pnl">5 · Shipment P&amp;L</button>
+  <button data-tab="integration">AI integration</button>
+</nav>
+
+<main>
+
+  <!-- ===================== SOURCES ===================== -->
+  <section class="tabpanel active" id="tab-sources">
+    <div class="grid2">
+      <div class="panel">
+        <h2>Provisional cost — shipment level</h2>
+        <p class="desc">One row per shipment: a column per cost header plus revenue. Matches "Shipment level final output". Uploading replaces each shipment's stored values in the database.</p>
+        <label class="field">Upload file (CSV/XLSX)</label>
+        <input type="file" id="file-ship" accept=".csv,.xlsx,.xls" />
+        <div id="ship-status" class="small" style="margin-top:8px;"></div>
+        <div class="note">Recognised columns: shipment ID (<span class="mono">awb</span>), LOB, node, pickup date, gross weight, revenue (<span class="mono">Correct Rev</span>), and a column per cost header.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Provisional cost — Last Mile box detail <span class="small">(optional, refines LM)</span></h2>
+        <p class="desc">Box-level charge-code breakdown. Matches "Last mile working". Where present for a shipment, replaces the shipment-level LM total.</p>
+        <div class="subblock">
+          <h3>Database connection <span class="badge">Integration point</span></h3>
+          <button class="btn teal btn-sm" id="btn-fetch-db">Fetch from internal DB</button>
+          <div class="note integration"><strong>For engineering:</strong> replace <span class="mono">fetchBoxLMFromDB()</span> in the script with the real call. It should resolve to <span class="mono">{shipmentId, boxId, chargeCode, amount}[]</span> — the app inserts those straight into <span class="mono">box_lm_costs</span> alongside anything uploaded by file.</div>
+          <div id="db-status" class="small" style="margin-top:6px;"></div>
+        </div>
+        <div class="subblock">
+          <h3>File upload</h3>
+          <input type="file" id="file-boxlm" accept=".csv,.xlsx,.xls" />
+          <div id="boxlm-status" class="small" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2>Invoice data</h2>
+      <p class="desc">Itemized (charge-code columns) or a ledger/statement (one lump amount per box). Tag each batch with the cost header it bills for.</p>
+      <div class="subblock">
+        <h3>New invoice batch</h3>
+        <label class="field">Vendor / reference</label>
+        <input type="text" id="new-inv-name" placeholder="e.g. Vendor X — May-Jun statement">
+        <label class="field">Cost header this invoice bills for</label>
+        <select id="new-inv-header">
+          <option value="LM">Last Mile</option><option value="PICKUP">Pickup</option><option value="FM">First Mile</option>
+          <option value="HUB">Hub</option><option value="OC">Origin Customs</option><option value="MM">Middle Mile</option>
+          <option value="OCEAN">Ocean</option><option value="DC">Destination Handling</option><option value="DESTCLEAR">Destination Clearance</option>
+          <option value="IOR">IOR</option><option value="DROPOFF">Dropoff</option>
+        </select>
+        <button class="btn secondary btn-sm" id="btn-new-invgroup" style="margin-top:9px;">Create batch</button>
+      </div>
+      <div class="subblock">
+        <h3>Invoice batches</h3>
+        <div id="invgroup-list"><div class="emptystate">Loading…</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== MAPPING ===================== -->
+  <section class="tabpanel" id="tab-mapping">
+    <div class="panel">
+      <h2>Charge code mapping</h2>
+      <p class="desc">Only relevant for itemized invoices with their own charge description text. Ledger-style invoices are attributed straight to the batch's cost header.</p>
+      <div class="toolbar"><span class="small" id="unmapped-count">0 unmapped terms</span></div>
+      <div class="tablewrap"><table class="data" id="mapping-table"><thead><tr><th>Raw term</th><th>Occurrences</th><th>Map to charge code</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel" style="margin-top:14px;">
+      <h2>Known charge codes</h2>
+      <div class="tablewrap" style="max-height:240px;"><table class="data" id="dict-table"><thead><tr><th>Keyword / phrase</th><th>Charge code</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="row-actions">
+        <input type="text" id="new-kw" placeholder="keyword" style="max-width:200px;">
+        <input type="text" id="new-code" placeholder="charge code" style="max-width:180px;">
+        <button class="btn secondary btn-sm" id="btn-add-kw">Add</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== RECONCILE ===================== -->
+  <section class="tabpanel" id="tab-reconcile">
+    <div class="panel" style="margin-bottom:14px; display:flex; align-items:flex-end; gap:18px; flex-wrap:wrap;">
+      <div><label class="field">Tolerance (₹)</label><input type="number" id="tol-amount" value="2" style="width:100px;"></div>
+      <div><label class="field">Tolerance (%)</label><input type="number" id="tol-pct" value="0.5" style="width:100px;"></div>
+      <button class="btn teal" id="btn-run-recon">Refresh from database &amp; run reconciliation</button>
+      <span class="small" id="recon-run-note"></span>
+    </div>
+    <div id="recon-strip"></div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="text" id="recon-search" placeholder="Search shipment / box / charge code">
+        <select id="recon-filter">
+          <option value="">All statuses</option><option value="matched">Matched</option><option value="pending">Pending actualisation</option>
+          <option value="review">Rate variance — review</option><option value="exception">Exception</option>
+        </select>
+        <button class="btn secondary btn-sm" id="btn-export-recon" style="margin-left:auto;">Export CSV</button>
+      </div>
+      <div class="tablewrap">
+        <table class="data" id="recon-table">
+          <thead><tr><th>Shipment</th><th>Box</th><th>Header</th><th>Charge code</th><th>Granularity</th><th class="num">Provisional</th><th class="num">Actual</th><th class="num">Delta</th><th>Reason</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ACCOUNTING ===================== -->
+  <section class="tabpanel" id="tab-accounting">
+    <div class="panel desc" style="margin-bottom:14px;">Derived from the last reconciliation run. Not-yet-invoiced provisions stay on the books; matched ones get reversed and replaced by the actual invoice amount.</div>
+    <div id="acct-strip"></div>
+    <div class="grid2">
+      <div class="panel"><h2>By cost header</h2>
+        <div class="tablewrap" style="max-height:340px;"><table class="data" id="acct-header-table"><thead><tr><th>Header</th><th class="num">Provision to carry</th><th class="num">Provision to reverse</th><th class="num">Invoice booked</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="panel"><h2>By LOB</h2>
+        <div class="tablewrap" style="max-height:340px;"><table class="data" id="acct-lob-table"><thead><tr><th>LOB</th><th class="num">Provision to carry</th><th class="num">Provision to reverse</th><th class="num">Invoice booked</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:14px;">
+      <div class="toolbar"><span class="small">Shipment-level detail behind the numbers above.</span><button class="btn secondary btn-sm" id="btn-export-acct" style="margin-left:auto;">Export CSV</button></div>
+      <div class="tablewrap"><table class="data" id="acct-detail-table"><thead><tr><th>Shipment</th><th>LOB</th><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Movement</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ===================== P&L ===================== -->
+  <section class="tabpanel" id="tab-pnl">
+    <div id="pnl-strip"></div>
+    <div class="panel"><h2>By LOB</h2>
+      <div class="tablewrap" style="max-height:260px;"><table class="data" id="pnl-lob-table"><thead><tr><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel" style="margin-top:14px;">
+      <div class="toolbar"><input type="text" id="pnl-search" placeholder="Search shipment / LOB"><button class="btn secondary btn-sm" id="btn-export-pnl" style="margin-left:auto;">Export CSV</button></div>
+      <div class="tablewrap"><table class="data" id="pnl-ship-table"><thead><tr><th>Shipment</th><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th><th>Cost maturity</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ===================== AI INTEGRATION ===================== -->
+  <section class="tabpanel" id="tab-integration">
+    <div class="panel">
+      <h2>Where the AI model plugs in</h2>
+      <p class="desc">Everything here runs on deterministic rules today. Three marked seams for <span class="mono">ai.xindus.net</span> — share the API spec and each drops in without touching the logic around it.</p>
+      <div class="subblock"><h3>1. Charge code mapping <span class="badge">mapChargeCodeWithAI()</span></h3><p class="small">Currently: keyword dictionary + manual review.</p></div>
+      <div class="subblock"><h3>2. Shipment # extraction from PDFs <span class="badge">extractShipmentFromPDFWithAI()</span></h3><p class="small">Not wired into this pilot build — structured file upload only for now.</p></div>
+      <div class="subblock"><h3>3. Variance narrative <span class="badge">explainVarianceWithAI()</span></h3><p class="small">Currently: a fixed reason code per row.</p></div>
+      <div class="note">This pilot build is meant to prove the reconciliation rules and accounting outputs on real data for 2–3 weeks. When your engineering team takes over, the tables in <span class="mono">schema.sql</span> and the two DB-integration stubs (<span class="mono">fetchBoxLMFromDB</span>, and eventually a shipment-level DB source) are the handover points.</div>
+    </div>
+  </section>
+</main>
+</div>
+
+<script>
+/* ============================= SUPABASE INIT ============================= */
+const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ============================= CONSTANTS ============================= */
+const HEADERS = ['PICKUP','FM','HUB','OC','MM','OCEAN','TRANSSHIP','DC','DESTCLEAR','IOR','DROPOFF','LM'];
+const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Customs',MM:'Middle Mile',OCEAN:'Ocean',
+  TRANSSHIP:'Trans-shipment',DC:'Destination Handling',DESTCLEAR:'Destination Clearance',IOR:'IOR',DROPOFF:'Dropoff',LM:'Last Mile'};
+const SHIP_COL_TO_HEADER = {
+  'pickup cost':'PICKUP', 'fm cost':'FM', 'hub cost':'HUB', 'oc cost':'OC', 'mm cost':'MM',
+  'uk to usa mm':'MM', 'ocean cost':'OCEAN', 'trans shipment cost':'TRANSSHIP',
+  'dc cost':'DC', 'destination clearance cost':'DESTCLEAR', 'ior cost':'IOR', 'dropoff cost':'DROPOFF', 'lm cost':'LM'
+};
+const LM_COL_TO_CODE = {
+  'base cost':'LM_BASE', 'fuel surcharge':'LM_FUEL', 'residentital surcharge ups':'LM_RES', 'residential surcharge':'LM_RES',
+  'das charges ups / fedex':'LM_DAS', 'addl wight handle charges':'LM_ADDLWT',
+  'over dim surcharges ups & fedex,amazon ground':'LM_OVERDIM_A', 'over dim surcharges usps, dhl & pandion,shipx ground':'LM_OVERDIM_B',
+  'over dim bt,uniuni,fedex':'LM_OVERDIM_C', 'boxc dhl additonal cost':'LM_BOXC_DHL', 'peak surcharge':'LM_PEAK', 'packaging surcharge':'LM_PACKAGING'
+};
+
+/* ============================= STATE (rebuilt from Supabase on each run) ============================= */
+const state = {
+  provisionalShipments: new Map(),
+  provisionalBoxLM: [],
+  invoiceGroups: [],
+  invoices: [],
+  chargeCodeDict: {},
+  reconciliation: [],
+  settings: { toleranceAmount:2, tolerancePct:0.5 }
+};
+
+/* ============================= HELPERS ============================= */
+function fmt(n){ if(n===undefined||n===null||isNaN(n)) return '—'; return '₹'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
+function num(v){ if(v===undefined||v===null||v==='') return NaN; const s=String(v).replace(/[₹,\s]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:Math.abs(n); }
+function normHeader(h){ return String(h||'').trim().toLowerCase(); }
+const ALIASES = {
+  shipmentId: ['awb','shipment id','shipmentid','shipment#','shipment','shipment no'],
+  boxId: ['box id','boxid','box','boxes','piece id'],
+  lob: ['lob','line of business'], node: ['node'], pickupDate: ['pickup date','pickup_date'],
+  grossWeight: ['gross weight'], revenue: ['correct rev','revenue'],
+  refKey: ['ref number','reference number','tracking number','ref no'],
+  chargeCode: ['charge code','nature of service','service','description','charge description']
+};
+function findCol(keys, aliasList){ return keys.find(k=> aliasList.includes(normHeader(k)) || aliasList.some(a=>normHeader(k).includes(a))); }
+function deriveFromRef(ref){ const s=String(ref).trim(); const m=s.match(/^(.*?)(B\d{1,3})$/i); return m? {shipmentId:m[1], boxId:s} : {shipmentId:s, boxId:''}; }
+function parseTabularFile(file){
+  return new Promise((resolve, reject)=>{
+    const ext = file.name.split('.').pop().toLowerCase();
+    if(ext==='csv'){ Papa.parse(file,{header:true, skipEmptyLines:true, complete:res=>resolve(res.data), error:reject}); }
+    else if(ext==='xlsx'||ext==='xls'){
+      const reader = new FileReader();
+      reader.onload = e=>{ try{ const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'}); const sheet=wb.Sheets[wb.SheetNames[0]]; resolve(XLSX.utils.sheet_to_json(sheet,{defval:''})); }catch(err){reject(err);} };
+      reader.onerror = reject; reader.readAsArrayBuffer(file);
+    } else reject(new Error('Unsupported file type: '+ext));
+  });
+}
+function showErr(elId, msg){ const el=document.getElementById(elId); el.textContent = msg; }
+
+/* --------------------- AI INTEGRATION STUBS --------------------- */
+async function mapChargeCodeWithAI(rawText){ return null; } // TODO(engineering): call ai.xindus.net
+async function explainVarianceWithAI(row){ return null; }   // TODO(engineering)
+
+/* ============================= AUTH ============================= */
+document.getElementById('btn-login').addEventListener('click', doLogin);
+document.getElementById('login-password').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+async function doLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error'); errEl.style.display='none';
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+  if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
+  await onLoggedIn(data.session);
+}
+document.getElementById('btn-logout').addEventListener('click', async ()=>{
+  await sbClient.auth.signOut();
+  document.getElementById('app-screen').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+});
+async function onLoggedIn(session){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app-screen').style.display='block';
+  document.getElementById('who-label').textContent = session.user.email;
+  await loadDictionary();
+  await loadInvoiceGroupsAndCounts();
+}
+(async function initAuth(){
+  const { data } = await sbClient.auth.getSession();
+  if(data.session){ await onLoggedIn(data.session); }
+})();
+
+/* ============================= PROVISIONAL: SHIPMENT LEVEL ============================= */
+document.getElementById('file-ship').addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  document.getElementById('ship-status').textContent = 'Parsing…';
+  try{
+    const raw = await parseTabularFile(file);
+    const keys = raw.length ? Object.keys(raw[0]) : [];
+    const shipCol = findCol(keys, ALIASES.shipmentId);
+    const lobCol = findCol(keys, ALIASES.lob), nodeCol = findCol(keys, ALIASES.node),
+          pdCol = findCol(keys, ALIASES.pickupDate), gwCol = findCol(keys, ALIASES.grossWeight), revCol = findCol(keys, ALIASES.revenue);
+    if(!shipCol){ document.getElementById('ship-status').textContent = 'Could not find a shipment ID column.'; return; }
+    const headerCols = {};
+    HEADERS.forEach(h=>{ const src = Object.keys(SHIP_COL_TO_HEADER).find(hc=>SHIP_COL_TO_HEADER[hc]===h); headerCols[h] = keys.find(k=> normHeader(k)===src); });
+
+    const shipmentRows = [], costRows = [];
+    raw.forEach(row=>{
+      if(!row[shipCol]) return;
+      const shipmentId = String(row[shipCol]).trim();
+      shipmentRows.push({
+        shipment_id: shipmentId,
+        lob: lobCol ? String(row[lobCol]).trim() : null,
+        node: nodeCol ? String(row[nodeCol]) : null,
+        pickup_date: pdCol ? String(row[pdCol]) : null,
+        gross_weight: gwCol ? (isNaN(num(row[gwCol]))?null:num(row[gwCol])) : null,
+        revenue: revCol ? (isNaN(num(row[revCol]))?null:num(row[revCol])) : null
+      });
+      HEADERS.forEach(h=>{
+        const col = headerCols[h];
+        if(col!==undefined && row[col]!=='' && row[col]!==undefined){
+          const v = num(row[col]);
+          if(!isNaN(v)) costRows.push({shipment_id:shipmentId, header:h, amount:v, source_file:file.name});
+        }
+      });
+    });
+
+    document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…`;
+    for(const chunk of chunkArray(shipmentRows, 500)){
+      const { error } = await sbClient.from('shipments').upsert(chunk, {onConflict:'shipment_id'});
+      if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
+    }
+    for(const chunk of chunkArray(costRows, 500)){
+      const { error } = await sbClient.from('shipment_costs').upsert(chunk, {onConflict:'shipment_id,header'});
+      if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
+    }
+    document.getElementById('ship-status').textContent = `${shipmentRows.length} shipments, ${costRows.length} cost lines saved to the database.`;
+  }catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
+});
+function chunkArray(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+
+/* ============================= PROVISIONAL: LM BOX DETAIL ============================= */
+async function fetchBoxLMFromDB(){
+  // TODO(engineering): replace with the real internal DB call.
+  // Expected resolved shape: [{ shipmentId, boxId, chargeCode, amount }, ...]
+  return [];
+}
+document.getElementById('btn-fetch-db').addEventListener('click', async ()=>{
+  document.getElementById('db-status').textContent = 'Contacting internal database…';
+  const recs = await fetchBoxLMFromDB();
+  if(!recs.length){ document.getElementById('db-status').textContent = 'No connection configured yet — this is the integration point above.'; return; }
+  const rows = recs.map(r=>({shipment_id:r.shipmentId, box_id:r.boxId, charge_code:r.chargeCode, amount:r.amount, source:'db'}));
+  const { error } = await sbClient.from('box_lm_costs').insert(rows);
+  document.getElementById('db-status').textContent = error ? ('Save failed: '+error.message) : `${rows.length} box-level LM records saved.`;
+});
+document.getElementById('file-boxlm').addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  document.getElementById('boxlm-status').textContent = 'Parsing…';
+  try{
+    const raw = await parseTabularFile(file);
+    const keys = raw.length ? Object.keys(raw[0]) : [];
+    const boxCol = findCol(keys, ALIASES.boxId);
+    const shipCol = findCol(keys, ['scancode','shipment id','awb']);
+    if(!boxCol){ document.getElementById('boxlm-status').textContent = 'Could not find a box ID column.'; return; }
+    const codeCols = {};
+    keys.forEach(k=>{ const nk=normHeader(k); const match = Object.keys(LM_COL_TO_CODE).find(c=> nk===c || nk.includes(c)); if(match) codeCols[k]=LM_COL_TO_CODE[match]; });
+    const rows = [];
+    raw.forEach(row=>{
+      if(!row[boxCol]) return;
+      const boxId = String(row[boxCol]).trim();
+      const shipmentId = shipCol && row[shipCol] ? String(row[shipCol]).trim() : deriveFromRef(boxId).shipmentId;
+      Object.entries(codeCols).forEach(([col,code])=>{
+        const v = num(row[col]);
+        if(!isNaN(v) && v!==0) rows.push({shipment_id:shipmentId, box_id:boxId, charge_code:code, amount:v, source:'file'});
+      });
+    });
+    document.getElementById('boxlm-status').textContent = `Saving ${rows.length} rows…`;
+    for(const chunk of chunkArray(rows, 500)){
+      const { error } = await sbClient.from('box_lm_costs').insert(chunk);
+      if(error){ document.getElementById('boxlm-status').textContent = 'Save failed: '+error.message; return; }
+    }
+    document.getElementById('boxlm-status').textContent = `${rows.length} charge-code rows saved from ${file.name}.`;
+  }catch(err){ document.getElementById('boxlm-status').textContent = 'Could not read file: '+err.message; }
+});
+
+/* ============================= INVOICE SOURCE ============================= */
+document.getElementById('btn-new-invgroup').addEventListener('click', async ()=>{
+  const name = document.getElementById('new-inv-name').value.trim();
+  const costHeader = document.getElementById('new-inv-header').value;
+  if(!name) return;
+  const id = 'grp_'+Date.now();
+  const { error } = await sbClient.from('invoice_groups').insert({id, name, cost_header:costHeader});
+  if(error){ alert('Could not create batch: '+error.message); return; }
+  document.getElementById('new-inv-name').value='';
+  await loadInvoiceGroupsAndCounts();
+});
+async function loadInvoiceGroupsAndCounts(){
+  const { data: groups, error } = await sbClient.from('invoice_groups').select('*').order('created_at');
+  if(error){ document.getElementById('invgroup-list').innerHTML = '<div class="note err">Could not load invoice batches: '+error.message+'</div>'; return; }
+  state.invoiceGroups = groups || [];
+  const wrap = document.getElementById('invgroup-list');
+  if(!state.invoiceGroups.length){ wrap.innerHTML='<div class="emptystate">No invoice batches yet.</div>'; return; }
+  wrap.innerHTML='';
+  for(const g of state.invoiceGroups){
+    const { count } = await sbClient.from('invoice_lines').select('*', {count:'exact', head:true}).eq('invoice_group_id', g.id);
+    const { data: fileRows } = await sbClient.from('invoice_lines').select('file_name').eq('invoice_group_id', g.id);
+    const files = [...new Set((fileRows||[]).map(r=>r.file_name).filter(Boolean))];
+    const div = document.createElement('div'); div.className='invgroup';
+    div.innerHTML = `
+      <div class="hd"><div class="name">${g.name} <span class="small">(${HEADER_LABEL[g.cost_header]||g.cost_header})</span></div><span class="small">${count||0} lines</span></div>
+      <div class="files">${files.map(f=>`<span>${f}</span>`).join('') || 'No files attached yet'}</div>
+      <div class="row-actions">
+        <label class="btn secondary btn-sm" style="cursor:pointer;">Attach file (CSV/XLSX)
+          <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-grp="${g.id}" data-header="${g.cost_header}" class="attach-structured">
+        </label>
+      </div>`;
+    wrap.appendChild(div);
+  }
+  wrap.querySelectorAll('.attach-structured').forEach(inp=>{
+    inp.addEventListener('change', async (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const grpId = e.target.dataset.grp, costHeader = e.target.dataset.header;
+      const raw = await parseTabularFile(file);
+      const keys = raw.length ? Object.keys(raw[0]) : [];
+      const shipCol = findCol(keys, ALIASES.shipmentId), boxCol = findCol(keys, ALIASES.boxId),
+            refCol = findCol(keys, ALIASES.refKey), chargeCol = findCol(keys, ALIASES.chargeCode),
+            amtCol = findCol(keys, ['amount','amt','value','cost','charge amount']);
+      const rows = [];
+      raw.forEach(row=>{
+        let shipmentId='', boxId='';
+        if(shipCol && row[shipCol]){ shipmentId=String(row[shipCol]).trim(); if(boxCol && row[boxCol]) boxId=String(row[boxCol]).trim(); }
+        else if(refCol && row[refCol]){ const d=deriveFromRef(row[refCol]); shipmentId=d.shipmentId; boxId=d.boxId; }
+        if(!shipmentId) return;
+        const amount = amtCol ? num(row[amtCol]) : NaN;
+        if(isNaN(amount)) return;
+        let chargeCodeRaw = chargeCol ? String(row[chargeCol]).trim() : '';
+        let chargeCode = null;
+        if(chargeCodeRaw){
+          const rlow = chargeCodeRaw.toLowerCase();
+          for(const kw in state.chargeCodeDict){ if(rlow===kw || rlow.includes(kw)){ chargeCode = state.chargeCodeDict[kw]; break; } }
+        }
+        rows.push({invoice_group_id:grpId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:chargeCodeRaw||null, charge_code:chargeCode, amount, cost_header:costHeader, file_name:file.name});
+      });
+      for(const chunk of chunkArray(rows, 500)){
+        const { error } = await sbClient.from('invoice_lines').insert(chunk);
+        if(error){ alert('Save failed: '+error.message); return; }
+      }
+      await loadInvoiceGroupsAndCounts();
+      await refreshMappingFromDB();
+    });
+  });
+}
+
+/* ============================= CHARGE CODE DICTIONARY ============================= */
+async function loadDictionary(){
+  const { data, error } = await sbClient.from('charge_code_dictionary').select('*');
+  if(error) return;
+  state.chargeCodeDict = {}; (data||[]).forEach(r=> state.chargeCodeDict[r.keyword]=r.charge_code);
+  renderDict();
+}
+document.getElementById('btn-add-kw').addEventListener('click', async ()=>{
+  const kw = document.getElementById('new-kw').value.trim().toLowerCase();
+  const code = document.getElementById('new-code').value.trim();
+  if(!kw||!code) return;
+  const { error } = await sbClient.from('charge_code_dictionary').upsert({keyword:kw, charge_code:code});
+  if(error){ alert(error.message); return; }
+  document.getElementById('new-kw').value=''; document.getElementById('new-code').value='';
+  await loadDictionary();
+});
+function renderDict(){
+  const tb = document.querySelector('#dict-table tbody'); tb.innerHTML='';
+  Object.entries(state.chargeCodeDict).forEach(([kw,code])=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${kw}</td><td class="mono">${code}</td><td><button class="btn secondary btn-sm del-kw">Remove</button></td>`;
+    tr.querySelector('.del-kw').addEventListener('click', async ()=>{ await sbClient.from('charge_code_dictionary').delete().eq('keyword', kw); await loadDictionary(); });
+    tb.appendChild(tr);
+  });
+}
+async function refreshMappingFromDB(){
+  const { data, error } = await sbClient.from('invoice_lines').select('charge_code_raw, charge_code').is('charge_code', null).not('charge_code_raw','is',null);
+  if(error) return;
+  const unmapped = {};
+  (data||[]).forEach(r=>{ if(r.charge_code_raw) unmapped[r.charge_code_raw] = (unmapped[r.charge_code_raw]||0)+1; });
+  const terms = Object.keys(unmapped);
+  document.getElementById('unmapped-count').textContent = `${terms.length} unmapped term${terms.length===1?'':'s'}`;
+  const tb = document.querySelector('#mapping-table tbody'); tb.innerHTML='';
+  if(!terms.length){ tb.innerHTML='<tr><td colspan="4" class="small">Nothing unmapped right now.</td></tr>'; return; }
+  terms.forEach(term=>{
+    const codes = [...new Set(Object.values(state.chargeCodeDict))];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${term}</td><td class="num">${unmapped[term]}</td>
+      <td><select class="map-select"><option value="">— choose —</option>${codes.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></td>
+      <td><button class="btn secondary btn-sm map-apply">Apply</button></td>`;
+    tr.querySelector('.map-apply').addEventListener('click', async ()=>{
+      const code = tr.querySelector('.map-select').value; if(!code) return;
+      await sbClient.from('charge_code_dictionary').upsert({keyword:term.toLowerCase(), charge_code:code});
+      await sbClient.from('invoice_lines').update({charge_code:code}).eq('charge_code_raw', term);
+      await loadDictionary(); await refreshMappingFromDB();
+    });
+    tb.appendChild(tr);
+  });
+}
+
+/* ============================= FETCH ALL FOR RECONCILIATION ============================= */
+async function fetchAllForReconciliation(){
+  const [{data:ships,error:e1}, {data:costs,error:e2}, {data:boxlm,error:e3}, {data:invLines,error:e4}] = await Promise.all([
+    sbClient.from('shipments').select('*'),
+    sbClient.from('shipment_costs').select('*'),
+    sbClient.from('box_lm_costs').select('*'),
+    sbClient.from('invoice_lines').select('*')
+  ]);
+  if(e1||e2||e3||e4){ throw new Error((e1||e2||e3||e4).message); }
+  state.provisionalShipments = new Map();
+  (ships||[]).forEach(s=> state.provisionalShipments.set(s.shipment_id, {shipmentId:s.shipment_id, lob:s.lob||'', node:s.node, pickupDate:s.pickup_date, grossWeight:s.gross_weight, revenue:s.revenue, costs:{}}));
+  (costs||[]).forEach(c=>{ const s = state.provisionalShipments.get(c.shipment_id); if(s) s.costs[c.header]=c.amount; });
+  state.provisionalBoxLM = (boxlm||[]).map(b=>({shipmentId:b.shipment_id, boxId:b.box_id, chargeCode:b.charge_code, amount:b.amount}));
+  state.invoices = (invLines||[]).map(l=>({shipmentId:l.shipment_id, boxId:l.box_id||'', chargeCodeRaw:l.charge_code_raw||'', chargeCode:l.charge_code, amount:l.amount, invoiceGroupId:l.invoice_group_id, costHeader:l.cost_header, flag:null}));
+}
+
+/* ============================= RECONCILIATION ENGINE ============================= */
+function headerOf(code){ return code.endsWith('_TOTAL') ? code.replace('_TOTAL','') : 'LM'; }
+async function runReconciliation(){
+  document.getElementById('recon-run-note').textContent = 'Loading latest data from the database…';
+  try{ await fetchAllForReconciliation(); }
+  catch(err){ document.getElementById('recon-run-note').textContent = 'Could not load data: '+err.message; return; }
+
+  state.settings.toleranceAmount = num(document.getElementById('tol-amount').value) || 0;
+  state.settings.tolerancePct = num(document.getElementById('tol-pct').value) || 0;
+  const tol = state.settings.toleranceAmount, tolPct = state.settings.tolerancePct;
+
+  const combos = new Map();
+  function ensure(shipmentId, boxId, code){ const key=`${shipmentId}|${boxId||''}|${code}`; if(!combos.has(key)) combos.set(key,{shipmentId,boxId,code,provisional:undefined,actual:undefined}); return combos.get(key); }
+
+  const shipmentsWithBoxLM = new Set();
+  state.provisionalBoxLM.forEach(r=>{ shipmentsWithBoxLM.add(r.shipmentId); const c=ensure(r.shipmentId,r.boxId,r.chargeCode); c.provisional=(c.provisional||0)+r.amount; });
+
+  state.provisionalShipments.forEach(ship=>{
+    HEADERS.forEach(h=>{
+      const amt = ship.costs[h]; if(amt===undefined) return;
+      if(h==='LM' && shipmentsWithBoxLM.has(ship.shipmentId)) return;
+      const c = ensure(ship.shipmentId, '', h+'_TOTAL'); c.provisional = amt;
+    });
+  });
+
+  const groups = new Map();
+  state.invoices.forEach(r=>{ const code=r.chargeCode||(r.costHeader+'_TOTAL'); const key=`${r.shipmentId}|${r.boxId||''}|${code}`; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r); });
+  groups.forEach(rows=>{
+    if(rows.length>1){ const amts=rows.map(r=>r.amount); const allEqual=amts.every(a=>Math.abs(a-amts[0])<0.01); rows.forEach((r,i)=>{ r.flag = allEqual ? (i>0?'duplicate':null) : 'multiple_review'; }); }
+    else rows[0].flag=null;
+  });
+
+  state.invoices.forEach(r=>{
+    if(r.flag==='duplicate') return;
+    const code = r.chargeCode || (r.costHeader+'_TOTAL');
+    if(code.endsWith('_TOTAL') && r.boxId && headerOf(code)==='LM'){
+      const detailSum = state.provisionalBoxLM.filter(p=>p.shipmentId===r.shipmentId && p.boxId===r.boxId).reduce((s,p)=>s+p.amount,0);
+      const c = ensure(r.shipmentId, r.boxId, code);
+      if(c.provisional===undefined && detailSum>0) c.provisional = detailSum;
+      c.actual = (c.actual||0) + r.amount;
+    } else { const c = ensure(r.shipmentId, r.boxId, code); c.actual = (c.actual||0) + r.amount; }
+  });
+
+  const results = [];
+  combos.forEach(c=>{
+    let reason, status, delta;
+    if(c.provisional===undefined && c.actual===undefined){ reason='No data'; status='info'; }
+    else if(c.provisional===undefined){ reason='Planning gap — not provisioned'; status='exception'; }
+    else if(c.actual===undefined){ reason='Pending actualisation'; status='pending'; }
+    else{
+      delta = c.actual - c.provisional;
+      const pct = c.provisional!==0 ? (delta/c.provisional*100) : (c.actual!==0?100:0);
+      if(Math.abs(delta)<=tol || Math.abs(pct)<=tolPct){ reason='Matched'; status='matched'; }
+      else if(Math.abs(pct)>=20){ reason = delta>0?'Large variance — actual exceeds provision':'Large variance — actual below provision'; status='exception'; }
+      else{ reason = delta>0?'Rate variance — actual higher':'Rate variance — actual lower'; status='review'; }
+    }
+    results.push({shipmentId:c.shipmentId, boxId:c.boxId, chargeCode:c.code, header:headerOf(c.code),
+      granularity: c.code.endsWith('_TOTAL') ? (c.boxId?'Box total':'Shipment-level') : 'Box detail',
+      provisional:c.provisional, actual:c.actual, delta, reason, status});
+  });
+  state.invoices.filter(r=>r.flag==='duplicate').forEach(r=>{
+    results.push({shipmentId:r.shipmentId, boxId:r.boxId, chargeCode:r.chargeCode||(r.costHeader+'_TOTAL'), header:r.costHeader, granularity:'Invoice line', provisional:undefined, actual:r.amount, delta:undefined, reason:'Duplicate charge — same box + charge billed twice', status:'exception'});
+  });
+  state.invoices.filter(r=>r.flag==='multiple_review').forEach(r=>{
+    results.push({shipmentId:r.shipmentId, boxId:r.boxId, chargeCode:r.chargeCode||(r.costHeader+'_TOTAL'), header:r.costHeader, granularity:'Invoice line', provisional:undefined, actual:r.amount, delta:undefined, reason:'Multiple differing charges under same code — review', status:'review'});
+  });
+
+  state.reconciliation = results;
+  renderReconciliation();
+  document.getElementById('recon-run-note').textContent = `${results.length} rows evaluated, as of ${new Date().toLocaleString()}.`;
+  renderAccounting(); renderPnL();
+}
+
+/* ============================= RENDER: RECONCILE ============================= */
+function renderReconciliation(){
+  const rows = state.reconciliation;
+  const sum = f => rows.reduce((s,r)=> s + (typeof r[f]==='number'?r[f]:0), 0);
+  const totalProv = sum('provisional'), totalAct = sum('actual'), totalDelta = totalAct-totalProv;
+  const matched = rows.filter(r=>r.status==='matched').length, exc = rows.filter(r=>r.status==='exception').length;
+  document.getElementById('recon-strip').innerHTML = `
+    <div class="ledgerstrip">
+      <div class="cell"><div class="lab">Total provisional</div><div class="val">${fmt(totalProv)}</div></div>
+      <div class="cell"><div class="lab">Total actual</div><div class="val">${fmt(totalAct)}</div></div>
+      <div class="cell"><div class="lab">Net delta</div><div class="val ${totalDelta<0?'pos':(totalDelta>0?'neg':'')}">${fmt(totalDelta)}</div></div>
+      <div class="cell"><div class="lab">Matched</div><div class="val">${matched} / ${rows.length}</div></div>
+      <div class="cell"><div class="lab">Exceptions</div><div class="val ${exc?'neg':''}">${exc}</div></div>
+    </div>`;
+  drawReconTable(rows);
+}
+function drawReconTable(rows){
+  const tb = document.querySelector('#recon-table tbody'); tb.innerHTML='';
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="10" class="small">Run reconciliation to see results.</td></tr>'; return; }
+  rows.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="mono">${r.shipmentId}</td><td class="mono">${r.boxId||''}</td><td>${HEADER_LABEL[r.header]||r.header}</td>
+      <td class="mono">${r.chargeCode}</td><td class="small">${r.granularity}</td>
+      <td class="num">${fmt(r.provisional)}</td><td class="num">${fmt(r.actual)}</td><td class="num">${typeof r.delta==='number'?fmt(r.delta):'—'}</td>
+      <td>${r.reason}</td><td><span class="status-pill status-${r.status}">${r.status}</span></td>`;
+    tb.appendChild(tr);
+  });
+}
+document.getElementById('btn-run-recon').addEventListener('click', runReconciliation);
+document.getElementById('recon-search').addEventListener('input', filterRecon);
+document.getElementById('recon-filter').addEventListener('change', filterRecon);
+function filterRecon(){
+  const q = document.getElementById('recon-search').value.toLowerCase();
+  const status = document.getElementById('recon-filter').value;
+  drawReconTable(state.reconciliation.filter(r=>{
+    const mq = !q || (r.shipmentId||'').toLowerCase().includes(q) || (r.boxId||'').toLowerCase().includes(q) || (r.chargeCode||'').toLowerCase().includes(q);
+    const ms = !status || r.status===status; return mq && ms;
+  }));
+}
+document.getElementById('btn-export-recon').addEventListener('click', ()=> exportCSV(state.reconciliation, ['shipmentId','boxId','header','chargeCode','granularity','provisional','actual','delta','reason','status'], 'reconciliation.csv'));
+
+/* ============================= PnL RESOLUTION ============================= */
+function resolvedRowsForPnL(){
+  const groups = new Map();
+  state.reconciliation.forEach(r=>{
+    if(r.reason.startsWith('Duplicate') || r.reason.startsWith('Multiple')) return;
+    const gkey = `${r.shipmentId}|${r.boxId||''}|${r.header}`;
+    if(!groups.has(gkey)) groups.set(gkey, []);
+    groups.get(gkey).push(r);
+  });
+  const resolved = [];
+  groups.forEach((rows, gkey)=>{
+    const [shipmentId, boxId, header] = gkey.split('|');
+    const totalRow = rows.find(r=> r.chargeCode.endsWith('_TOTAL'));
+    if(boxId && totalRow && rows.length>1){ resolved.push({shipmentId, boxId, header, provisional:totalRow.provisional, actual:totalRow.actual}); }
+    else{
+      const provDefined = rows.some(r=>typeof r.provisional==='number'), actDefined = rows.some(r=>typeof r.actual==='number');
+      const prov = rows.reduce((s,r)=> s+(typeof r.provisional==='number'?r.provisional:0),0);
+      const act = rows.reduce((s,r)=> s+(typeof r.actual==='number'?r.actual:0),0);
+      resolved.push({shipmentId, boxId, header, provisional:provDefined?prov:undefined, actual:actDefined?act:undefined});
+    }
+  });
+  return resolved;
+}
+
+/* ============================= ACCOUNTING ============================= */
+function renderAccounting(){
+  const resolved = resolvedRowsForPnL();
+  let carry=0, reverse=0, booked=0; const byHeader={}, byLOB={}, detail=[];
+  resolved.forEach(r=>{
+    const ship = state.provisionalShipments.get(r.shipmentId);
+    const lob = (ship && ship.lob) ? ship.lob : 'Unassigned';
+    if(!byHeader[r.header]) byHeader[r.header]={carry:0,reverse:0,booked:0};
+    if(!byLOB[lob]) byLOB[lob]={carry:0,reverse:0,booked:0};
+    let movement;
+    if(r.actual!==undefined){
+      const p = r.provisional||0; reverse+=p; booked+=r.actual;
+      byHeader[r.header].reverse+=p; byHeader[r.header].booked+=r.actual;
+      byLOB[lob].reverse+=p; byLOB[lob].booked+=r.actual;
+      movement = 'Reverse provision, book invoice';
+    } else if(r.provisional!==undefined){
+      carry+=r.provisional; byHeader[r.header].carry+=r.provisional; byLOB[lob].carry+=r.provisional;
+      movement = 'Carry provision';
+    } else return;
+    detail.push({shipmentId:r.shipmentId, lob, header:r.header, provisional:r.provisional, actual:r.actual, movement});
+  });
+  document.getElementById('acct-strip').innerHTML = `
+    <div class="ledgerstrip">
+      <div class="cell"><div class="lab">Provision to carry (books)</div><div class="val">${fmt(carry)}</div></div>
+      <div class="cell"><div class="lab">Provision to reverse</div><div class="val">${fmt(reverse)}</div></div>
+      <div class="cell"><div class="lab">Invoice booked</div><div class="val">${fmt(booked)}</div></div>
+      <div class="cell"><div class="lab">Net P&amp;L movement</div><div class="val ${(booked-reverse)>0?'neg':((booked-reverse)<0?'pos':'')}">${fmt(booked-reverse)}</div></div>
+    </div>`;
+  const ht = document.querySelector('#acct-header-table tbody'); ht.innerHTML='';
+  Object.entries(byHeader).forEach(([h,v])=>{ ht.innerHTML += `<tr><td>${HEADER_LABEL[h]||h}</td><td class="num">${fmt(v.carry)}</td><td class="num">${fmt(v.reverse)}</td><td class="num">${fmt(v.booked)}</td></tr>`; });
+  const lt = document.querySelector('#acct-lob-table tbody'); lt.innerHTML='';
+  Object.entries(byLOB).forEach(([l,v])=>{ lt.innerHTML += `<tr><td>${l}</td><td class="num">${fmt(v.carry)}</td><td class="num">${fmt(v.reverse)}</td><td class="num">${fmt(v.booked)}</td></tr>`; });
+  const dt = document.querySelector('#acct-detail-table tbody'); dt.innerHTML='';
+  detail.forEach(r=>{ dt.innerHTML += `<tr><td class="mono">${r.shipmentId}</td><td>${r.lob}</td><td>${HEADER_LABEL[r.header]||r.header}</td><td class="num">${fmt(r.provisional)}</td><td class="num">${fmt(r.actual)}</td><td class="small">${r.movement}</td></tr>`; });
+  state._acctDetail = detail;
+}
+document.getElementById('btn-export-acct').addEventListener('click', ()=> exportCSV(state._acctDetail||[], ['shipmentId','lob','header','provisional','actual','movement'], 'accounting_movements.csv'));
+
+/* ============================= SHIPMENT P&L ============================= */
+function renderPnL(){
+  const resolved = resolvedRowsForPnL();
+  const costByShipment = new Map();
+  resolved.forEach(r=>{ const cur=costByShipment.get(r.shipmentId)||0; costByShipment.set(r.shipmentId, cur+(r.actual!==undefined?r.actual:(r.provisional||0))); });
+  const maturityByShipment = new Map();
+  resolved.forEach(r=>{ const m=maturityByShipment.get(r.shipmentId)||{actual:false,provisional:false}; if(r.actual!==undefined) m.actual=true; if(r.provisional!==undefined && r.actual===undefined) m.provisional=true; maturityByShipment.set(r.shipmentId,m); });
+  const rows = [];
+  state.provisionalShipments.forEach((ship, shipmentId)=>{
+    const cost = costByShipment.get(shipmentId) || 0;
+    const revenue = isNaN(ship.revenue) || ship.revenue===null ? 0 : ship.revenue;
+    const contribution = revenue - cost, pct = revenue ? (contribution/revenue*100) : null;
+    const m = maturityByShipment.get(shipmentId) || {};
+    const maturity = m.actual && m.provisional ? 'Mixed' : (m.actual ? 'Actual' : (m.provisional ? 'Provisional' : 'No cost data'));
+    rows.push({shipmentId, lob: ship.lob||'Unassigned', revenue, cost, contribution, pct, maturity});
+  });
+  const byLOB = {};
+  rows.forEach(r=>{ if(!byLOB[r.lob]) byLOB[r.lob]={revenue:0,cost:0}; byLOB[r.lob].revenue+=r.revenue; byLOB[r.lob].cost+=r.cost; });
+  const totalRev = rows.reduce((s,r)=>s+r.revenue,0), totalCost = rows.reduce((s,r)=>s+r.cost,0);
+  document.getElementById('pnl-strip').innerHTML = `
+    <div class="ledgerstrip">
+      <div class="cell"><div class="lab">Total revenue</div><div class="val">${fmt(totalRev)}</div></div>
+      <div class="cell"><div class="lab">Total cost</div><div class="val">${fmt(totalCost)}</div></div>
+      <div class="cell"><div class="lab">Contribution</div><div class="val ${(totalRev-totalCost)<0?'neg':'pos'}">${fmt(totalRev-totalCost)}</div></div>
+      <div class="cell"><div class="lab">Margin %</div><div class="val">${totalRev? ((totalRev-totalCost)/totalRev*100).toFixed(1):'0.0'}%</div></div>
+    </div>`;
+  const lt = document.querySelector('#pnl-lob-table tbody'); lt.innerHTML='';
+  Object.entries(byLOB).forEach(([lob,v])=>{ const c=v.revenue-v.cost; lt.innerHTML += `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.cost)}</td><td class="num">${fmt(c)}</td><td class="num">${v.revenue?(c/v.revenue*100).toFixed(1):'0.0'}%</td></tr>`; });
+  state._pnlRows = rows;
+  drawPnLTable(rows);
+}
+function drawPnLTable(rows){
+  const st = document.querySelector('#pnl-ship-table tbody'); st.innerHTML='';
+  if(!rows.length){ st.innerHTML='<tr><td colspan="7" class="small">Run reconciliation to populate P&L.</td></tr>'; return; }
+  rows.forEach(r=>{ st.innerHTML += `<tr><td class="mono">${r.shipmentId}</td><td>${r.lob}</td><td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.contribution)}</td><td class="num">${r.pct===null?'—':r.pct.toFixed(1)+'%'}</td><td class="small">${r.maturity}</td></tr>`; });
+}
+document.getElementById('pnl-search').addEventListener('input', ()=>{
+  const q = document.getElementById('pnl-search').value.toLowerCase();
+  drawPnLTable((state._pnlRows||[]).filter(r=> !q || r.shipmentId.toLowerCase().includes(q) || r.lob.toLowerCase().includes(q)));
+});
+document.getElementById('btn-export-pnl').addEventListener('click', ()=> exportCSV(state._pnlRows||[], ['shipmentId','lob','revenue','cost','contribution','pct','maturity'], 'shipment_pnl.csv'));
+
+function exportCSV(rows, cols, filename){
+  if(!rows.length) return;
+  const lines = [cols.join(',')];
+  rows.forEach(r=> lines.push(cols.map(c=> JSON.stringify(r[c]===undefined?'':r[c])).join(',')));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+}
+
+/* ============================= TAB SWITCHING ============================= */
+function switchTab(name){
+  document.querySelectorAll('nav.steps button').forEach(b=> b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.tabpanel').forEach(p=> p.classList.toggle('active', p.id==='tab-'+name));
+}
+document.querySelectorAll('nav.steps button').forEach(b=> b.addEventListener('click', ()=> switchTab(b.dataset.tab)));
+</script>
+</body>
+</html>
