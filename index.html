@@ -365,7 +365,7 @@ function parseRawRows(file){
     } else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
       reader.onload = e=>{ try{
-          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array', cellDates:true});
           const sheet=wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
           resolve(rows);
@@ -373,6 +373,19 @@ function parseRawRows(file){
       reader.onerror = reject; reader.readAsArrayBuffer(file);
     } else reject(new Error('Unsupported file type: '+ext));
   });
+}
+// Handles: JS Date (from cellDates:true), a leftover Excel serial number
+// (older files / edge cases), or an already-formatted date string.
+function toISODate(val){
+  if(val===''||val==null) return null;
+  if(val instanceof Date && !isNaN(val)) return val.toISOString().slice(0,10);
+  if(typeof val === 'number'){
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000)); // Excel serial → JS Date
+    if(!isNaN(d)) return d.toISOString().slice(0,10);
+  }
+  const parsed = new Date(val);
+  if(!isNaN(parsed)) return parsed.toISOString().slice(0,10);
+  return null; // couldn't parse — better to leave null than send garbage to a date column
 }
 function guessHeaderRowIndex(rawRows){
   for(let i=0; i<Math.min(rawRows.length, 15); i++){
@@ -546,7 +559,7 @@ async function importShipmentsWithMapping(){
     }
     if(!shipmentId) return;
     if(shipmentMap.has(shipmentId)) dupCount++;
-    shipmentMap.set(shipmentId, {shipment_id:shipmentId, lob, node, pickup_date: pickupDate ? String(pickupDate).slice(0,10) : null,
+    shipmentMap.set(shipmentId, {shipment_id:shipmentId, lob, node, pickup_date: toISODate(pickupDate),
       mawb, gross_weight: isNaN(grossWeight)?null:grossWeight, revenue_amount: isNaN(revenue)?null:revenue, revenue_currency: revCcy});
     Object.entries(costs).forEach(([code,amt])=> costMap.set(`${shipmentId}|${code}`, {shipment_id:shipmentId, cost_header:code, provisional_amount:amt}));
   });
