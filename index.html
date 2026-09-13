@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Cost Subledger — Phase 1 Pilot</title>
+<title>Cost Subledger — Phase 1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -20,316 +20,357 @@
     --slate-dim:#EBEDEA;
   }
   *{box-sizing:border-box;}
-  body{ margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;}
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; font-size:13.5px; line-height:1.5; -webkit-font-smoothing:antialiased;}
   .mono{ font-family:'IBM Plex Mono', monospace; }
-  header.top{ padding:20px 30px 16px; border-bottom:1px solid var(--line-strong); display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;}
-  header.top h1{ font-size:19px; font-weight:600; margin:0; letter-spacing:-0.01em;}
-  header.top .tag{ color:var(--sub); font-size:12.5px; margin-top:2px;}
-  header.top .right{ display:flex; align-items:center; gap:12px; }
-  header.top .phase{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--teal); border:1px solid var(--teal); padding:3px 8px; border-radius:3px;}
-  header.top .who{ font-size:12px; color:var(--sub); }
-  nav.steps{ display:flex; gap:2px; padding:0 30px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto;}
-  nav.steps button{ background:none; border:none; padding:12px 14px; font-family:'IBM Plex Sans'; font-size:13px; color:var(--sub); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;}
+  header.top{ padding:16px 26px 14px; border-bottom:1px solid var(--line-strong); display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  header.top h1{ font-size:18px; font-weight:600; margin:0; }
+  header.top .tag{ color:var(--sub); font-size:12px; margin-top:2px;}
+  header.top .right{ display:flex; align-items:center; gap:10px; }
+  header.top .who{ font-size:11.5px; color:var(--sub); }
+  header.top .phase{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--teal); border:1px solid var(--teal); padding:2px 7px; border-radius:3px;}
+  nav.steps{ display:flex; gap:2px; padding:0 26px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto;}
+  nav.steps button{ background:none; border:none; padding:10px 12px; font-family:'IBM Plex Sans'; font-size:12px; color:var(--sub); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;}
   nav.steps button.active{ color:var(--ink); border-bottom:2px solid var(--teal); font-weight:600;}
-  nav.steps button:hover{ color:var(--ink); }
-  main{ padding:24px 30px 60px; max-width:1360px; margin:0 auto;}
+  main{ padding:20px 26px 60px; max-width:1420px; margin:0 auto;}
   .tabpanel{ display:none; } .tabpanel.active{ display:block; }
-  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:900px){ .grid2{ grid-template-columns:1fr; } }
-  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:16px 18px; }
-  .panel + .panel{ margin-top:14px; }
-  .panel h2{ font-size:14px; font-weight:600; margin:0 0 4px; }
-  .panel .desc{ color:var(--sub); font-size:12px; margin:0 0 12px; }
-  .subblock{ border-top:1px solid var(--line); padding-top:12px; margin-top:12px; } .subblock:first-of-type{ border-top:none; padding-top:0; margin-top:0; }
-  .subblock h3{ font-size:12.5px; font-weight:600; margin:0 0 8px; color:var(--ink);}
-  .subblock h3 .badge{ font-family:'IBM Plex Mono'; font-size:10px; color:var(--teal); border:1px solid var(--teal); border-radius:3px; padding:1px 6px; margin-left:8px; font-weight:500;}
-  label.field{ display:block; font-size:11.5px; color:var(--sub); margin:8px 0 3px; }
-  input[type=text], input[type=number], input[type=email], input[type=password], select{ width:100%; font-family:'IBM Plex Mono', monospace; font-size:12px; padding:6px 8px; border:1px solid var(--line-strong); border-radius:3px; background:#FBFCFB; color:var(--ink);}
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; } @media (max-width:900px){ .grid2{ grid-template-columns:1fr; } }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:14px 16px; }
+  .panel + .panel{ margin-top:12px; }
+  .panel h2{ font-size:13.5px; font-weight:600; margin:0 0 4px; }
+  .panel .desc{ color:var(--sub); font-size:11.5px; margin:0 0 10px; }
+  .subblock{ border-top:1px solid var(--line); padding-top:10px; margin-top:10px; } .subblock:first-of-type{ border-top:none; padding-top:0; margin-top:0; }
+  .subblock h3{ font-size:12px; font-weight:600; margin:0 0 6px; }
+  .subblock h3 .badge{ font-family:'IBM Plex Mono'; font-size:9.5px; color:var(--teal); border:1px solid var(--teal); border-radius:3px; padding:1px 6px; margin-left:6px; }
+  label.field{ display:block; font-size:11px; color:var(--sub); margin:7px 0 3px; }
+  input[type=text], input[type=number], input[type=date], input[type=email], input[type=password], select, textarea{
+    width:100%; font-family:'IBM Plex Mono', monospace; font-size:12px; padding:6px 8px; border:1px solid var(--line-strong); border-radius:3px; background:#FBFCFB; color:var(--ink);}
+  textarea{ font-family:'IBM Plex Sans'; min-height:60px; }
   input[type=file]{ font-size:12px; }
-  button.btn{ font-family:'IBM Plex Sans'; font-size:12px; font-weight:600; padding:7px 13px; background:var(--ink); color:#fff; border:none; border-radius:3px; cursor:pointer;}
+  button.btn{ font-family:'IBM Plex Sans'; font-size:11.5px; font-weight:600; padding:6px 12px; background:var(--ink); color:#fff; border:none; border-radius:3px; cursor:pointer;}
   button.btn.secondary{ background:#fff; color:var(--ink); border:1px solid var(--line-strong); }
-  button.btn.teal{ background:var(--teal); }
-  button.btn-sm{ font-size:11px; padding:5px 9px; }
-  button.btn:disabled{ opacity:.5; cursor:not-allowed; }
-  .row-actions{ display:flex; gap:8px; margin-top:9px; flex-wrap:wrap; }
-  .note{ font-size:11px; color:var(--sub); background:var(--slate-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-top:9px;}
+  button.btn.teal{ background:var(--teal); } button.btn.red{ background:var(--red); } button.btn.amber{ background:var(--amber); }
+  button.btn-sm{ font-size:10.5px; padding:4px 8px; }
+  button.btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .row-actions{ display:flex; gap:7px; margin-top:8px; flex-wrap:wrap; }
+  .note{ font-size:10.5px; color:var(--sub); background:var(--slate-dim); border:1px solid var(--line); border-radius:3px; padding:7px 9px; margin-top:8px;}
   .note.integration{ background:var(--teal-dim); border-color:var(--teal); color:#0B4A3E; }
+  .note.warn{ background:var(--amber-dim); border-color:var(--amber); color:#6b4d10; }
   .note.err{ background:var(--red-dim); border-color:var(--red); color:var(--red); }
-  table{ width:100%; border-collapse:collapse; font-size:12px; }
-  table.data th{ text-align:left; font-weight:600; font-size:10.5px; color:var(--sub); padding:7px 9px; border-bottom:1px solid var(--line-strong); background:#FAFBFA; position:sticky; top:0;}
-  table.data td{ padding:6px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table{ width:100%; border-collapse:collapse; font-size:11.5px; }
+  table.data th{ text-align:left; font-weight:600; font-size:10px; color:var(--sub); padding:6px 8px; border-bottom:1px solid var(--line-strong); background:#FAFBFA; position:sticky; top:0;}
+  table.data td{ padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   table.data tbody tr:hover{ background:#FAFBF9; }
   .num{ font-family:'IBM Plex Mono'; text-align:right; white-space:nowrap; }
-  .tablewrap{ max-height:440px; overflow:auto; border:1px solid var(--line); border-radius:4px; margin-top:9px;}
-  .status-pill{ display:inline-block; font-family:'IBM Plex Mono'; font-size:10px; font-weight:600; padding:2px 7px; border-radius:3px; white-space:nowrap;}
-  .status-matched{ background:var(--teal-dim); color:var(--teal); }
-  .status-pending{ background:var(--slate-dim); color:var(--sub); }
-  .status-review{ background:var(--amber-dim); color:var(--amber); }
-  .status-exception{ background:var(--red-dim); color:var(--red); }
-  .status-info{ background:var(--slate-dim); color:var(--sub); }
-  .ledgerstrip{ display:flex; border:1px solid var(--line-strong); border-radius:4px; background:var(--panel); margin-bottom:18px; overflow-x:auto;}
-  .ledgerstrip .cell{ flex:1; padding:14px 18px; border-right:1px solid var(--line); min-width:150px;}
+  .tablewrap{ max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:4px; margin-top:8px;}
+  .status-pill{ display:inline-block; font-family:'IBM Plex Mono'; font-size:9.5px; font-weight:600; padding:2px 6px; border-radius:3px; white-space:nowrap;}
+  .st-matched,.st-approved{ background:var(--teal-dim); color:var(--teal); }
+  .st-pending,.st-draft{ background:var(--slate-dim); color:var(--sub); }
+  .st-review,.st-pending_approval{ background:var(--amber-dim); color:var(--amber); }
+  .st-exception,.st-rejected,.st-disputed{ background:var(--red-dim); color:var(--red); }
+  .ledgerstrip{ display:flex; border:1px solid var(--line-strong); border-radius:4px; background:var(--panel); margin-bottom:14px; overflow-x:auto;}
+  .ledgerstrip .cell{ flex:1; padding:11px 15px; border-right:1px solid var(--line); min-width:130px;}
   .ledgerstrip .cell:last-child{ border-right:none; }
-  .ledgerstrip .cell .lab{ font-size:10.5px; color:var(--sub); margin-bottom:5px;}
-  .ledgerstrip .cell .val{ font-family:'IBM Plex Mono'; font-size:20px; font-weight:600;}
+  .ledgerstrip .cell .lab{ font-size:10px; color:var(--sub); margin-bottom:4px;}
+  .ledgerstrip .cell .val{ font-family:'IBM Plex Mono'; font-size:17px; font-weight:600;}
   .ledgerstrip .cell .val.neg{ color:var(--red);} .ledgerstrip .cell .val.pos{ color:var(--teal);}
-  .toolbar{ display:flex; gap:9px; align-items:center; margin-bottom:9px; flex-wrap:wrap;}
+  .toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;}
   .toolbar input, .toolbar select{ width:auto; }
-  .invgroup{ border:1px solid var(--line); border-radius:4px; padding:9px 11px; margin-bottom:9px;}
-  .invgroup .hd{ display:flex; justify-content:space-between; align-items:center; }
-  .invgroup .hd .name{ font-weight:600; font-size:12.5px; }
-  .invgroup .files{ margin-top:5px; font-size:11px; color:var(--sub);}
-  .invgroup .files span{ display:inline-block; background:var(--slate-dim); border-radius:3px; padding:2px 7px; margin:2px 4px 0 0; font-family:'IBM Plex Mono';}
-  .emptystate{ padding:22px; text-align:center; color:var(--sub); font-size:12.5px; border:1px dashed var(--line-strong); border-radius:4px;}
-  .small{ font-size:11px; color:var(--sub); }
+  .emptystate{ padding:18px; text-align:center; color:var(--sub); font-size:12px; border:1px dashed var(--line-strong); border-radius:4px;}
+  .small{ font-size:10.5px; color:var(--sub); }
+  .invcard{ border:1px solid var(--line); border-radius:4px; padding:10px 12px; margin-bottom:10px; }
+  .invcard .hd{ display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:6px; }
+  .invcard .hd .name{ font-weight:600; font-size:12.5px; }
+  .invcard .meta{ font-size:10.5px; color:var(--sub); margin-top:3px; }
+  .line-row{ display:grid; grid-template-columns:2fr 1fr auto; gap:6px; margin-bottom:5px; align-items:center;}
+  .modalbg{ position:fixed; inset:0; background:rgba(20,30,25,0.45); display:none; align-items:flex-start; justify-content:center; padding:40px 16px; z-index:50; overflow:auto;}
+  .modalbg.open{ display:flex; }
+  .modal{ background:#fff; border-radius:6px; max-width:760px; width:100%; padding:20px 22px; }
+  .closebtn{ float:right; background:none; border:none; font-size:18px; cursor:pointer; color:var(--sub);}
   #login-screen{ min-height:100vh; display:flex; align-items:center; justify-content:center; }
-  #login-screen .box{ background:var(--panel); border:1px solid var(--line-strong); border-radius:6px; padding:32px 34px; width:340px; }
-  #login-screen h1{ font-size:17px; margin:0 0 4px; }
-  #login-screen p{ color:var(--sub); font-size:12.5px; margin:0 0 18px; }
+  #login-screen .box{ background:var(--panel); border:1px solid var(--line-strong); border-radius:6px; padding:28px 30px; width:320px; }
   #app-screen{ display:none; }
+  .chip{ display:inline-block; background:var(--slate-dim); border-radius:3px; padding:2px 6px; margin:2px 3px 0 0; font-family:'IBM Plex Mono'; font-size:10px; }
 </style>
 </head>
 <body>
 
 <div id="login-screen">
   <div class="box">
-    <h1>Cost Subledger</h1>
-    <p>Phase 1 pilot — sign in with the account your Finance lead set up in Supabase.</p>
-    <label class="field">Email</label>
-    <input type="email" id="login-email" placeholder="you@xindus.net">
-    <label class="field">Password</label>
-    <input type="password" id="login-password">
-    <button class="btn teal" id="btn-login" style="margin-top:14px; width:100%;">Sign in</button>
+    <h1 style="font-size:16px;margin:0 0 4px;">Cost Subledger</h1>
+    <p class="small" style="margin:0 0 14px;">Sign in with your assigned account.</p>
+    <label class="field">Email</label><input type="email" id="login-email">
+    <label class="field">Password</label><input type="password" id="login-password">
+    <button class="btn teal" id="btn-login" style="margin-top:12px;width:100%;">Sign in</button>
     <div id="login-error" class="note err" style="display:none;"></div>
   </div>
 </div>
 
 <div id="app-screen">
 <header class="top">
-  <div>
-    <h1>Cost Subledger — Reconciliation &amp; Provisioning</h1>
-    <div class="tag">Provisional vs. actual, accounting movements, and shipment P&amp;L</div>
-  </div>
+  <div><h1>Cost Subledger</h1><div class="tag">Shipment-level allocation · full approval workflow</div></div>
   <div class="right">
     <span class="who" id="who-label"></span>
     <button class="btn secondary btn-sm" id="btn-logout">Sign out</button>
-    <div class="phase">PHASE 1 PILOT</div>
+    <div class="phase">PHASE 1</div>
   </div>
 </header>
 
 <nav class="steps">
-  <button data-tab="sources" class="active">1 · Sources</button>
-  <button data-tab="mapping">2 · Charge code mapping</button>
-  <button data-tab="reconcile">3 · Reconciliation</button>
-  <button data-tab="accounting">4 · Accounting</button>
-  <button data-tab="pnl">5 · Shipment P&amp;L</button>
-  <button data-tab="integration">AI integration</button>
+  <button data-tab="sources" class="active">Sources</button>
+  <button data-tab="charges">Charge Codes</button>
+  <button data-tab="inv-other">Invoices — Other Headers</button>
+  <button data-tab="inv-lm">Invoices — Last Mile</button>
+  <button data-tab="queue">Approval Queue</button>
+  <button data-tab="disputes">Disputes</button>
+  <button data-tab="aging">Aging &amp; Write-back</button>
+  <button data-tab="reports">P&amp;L / Accounting</button>
+  <button data-tab="admin">Access &amp; Thresholds</button>
 </nav>
 
 <main>
 
-  <!-- ===================== SOURCES ===================== -->
-  <section class="tabpanel active" id="tab-sources">
-    <div class="grid2">
-      <div class="panel">
-        <h2>Provisional cost — shipment level</h2>
-        <p class="desc">One row per shipment: a column per cost header plus revenue. Matches "Shipment level final output". Uploading replaces each shipment's stored values in the database.</p>
-        <label class="field">Upload file (CSV/XLSX)</label>
-        <input type="file" id="file-ship" accept=".csv,.xlsx,.xls" />
-        <div id="ship-status" class="small" style="margin-top:8px;"></div>
-        <div class="note">Recognised columns: shipment ID (<span class="mono">awb</span>), LOB, node, pickup date, gross weight, revenue (<span class="mono">Correct Rev</span>), and a column per cost header.</div>
-      </div>
-
-      <div class="panel">
-        <h2>Provisional cost — Last Mile box detail <span class="small">(optional, refines LM)</span></h2>
-        <p class="desc">Box-level charge-code breakdown. Matches "Last mile working". Where present for a shipment, replaces the shipment-level LM total.</p>
-        <div class="subblock">
-          <h3>Database connection <span class="badge">Integration point</span></h3>
-          <button class="btn teal btn-sm" id="btn-fetch-db">Fetch from internal DB</button>
-          <div class="note integration"><strong>For engineering:</strong> replace <span class="mono">fetchBoxLMFromDB()</span> in the script with the real call. It should resolve to <span class="mono">{shipmentId, boxId, chargeCode, amount}[]</span> — the app inserts those straight into <span class="mono">box_lm_costs</span> alongside anything uploaded by file.</div>
-          <div id="db-status" class="small" style="margin-top:6px;"></div>
-        </div>
-        <div class="subblock">
-          <h3>File upload</h3>
-          <input type="file" id="file-boxlm" accept=".csv,.xlsx,.xls" />
-          <div id="boxlm-status" class="small" style="margin-top:8px;"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-top:16px;">
-      <h2>Invoice data</h2>
-      <p class="desc">Itemized (charge-code columns) or a ledger/statement (one lump amount per box). Tag each batch with the cost header it bills for.</p>
-      <div class="subblock">
-        <h3>New invoice batch</h3>
-        <label class="field">Vendor / reference</label>
-        <input type="text" id="new-inv-name" placeholder="e.g. Vendor X — May-Jun statement">
-        <label class="field">Cost header this invoice bills for</label>
-        <select id="new-inv-header">
-          <option value="LM">Last Mile</option><option value="PICKUP">Pickup</option><option value="FM">First Mile</option>
-          <option value="HUB">Hub</option><option value="OC">Origin Customs</option><option value="MM">Middle Mile</option>
-          <option value="OCEAN">Ocean</option><option value="DC">Destination Handling</option><option value="DESTCLEAR">Destination Clearance</option>
-          <option value="IOR">IOR</option><option value="DROPOFF">Dropoff</option>
-        </select>
-        <button class="btn secondary btn-sm" id="btn-new-invgroup" style="margin-top:9px;">Create batch</button>
-      </div>
-      <div class="subblock">
-        <h3>Invoice batches</h3>
-        <div id="invgroup-list"><div class="emptystate">Loading…</div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== MAPPING ===================== -->
-  <section class="tabpanel" id="tab-mapping">
+<!-- ===================== SOURCES ===================== -->
+<section class="tabpanel active" id="tab-sources">
+  <div class="grid2">
     <div class="panel">
-      <h2>Charge code mapping</h2>
-      <p class="desc">Only relevant for itemized invoices with their own charge description text. Ledger-style invoices are attributed straight to the batch's cost header.</p>
-      <div class="toolbar"><span class="small" id="unmapped-count">0 unmapped terms</span></div>
-      <div class="tablewrap"><table class="data" id="mapping-table"><thead><tr><th>Raw term</th><th>Occurrences</th><th>Map to charge code</th><th></th></tr></thead><tbody></tbody></table></div>
+      <h2>Shipment-level provisional cost</h2>
+      <p class="desc">One row per shipment: LOB, MAWB, gross weight, revenue, and a column per cost header. Because your export's column names vary (and some repeat), you'll map columns to fields after upload rather than relying on auto-detection alone.</p>
+      <input type="file" id="file-ship" accept=".csv,.xlsx,.xls">
+      <div id="ship-status" class="small" style="margin-top:6px;"></div>
     </div>
-    <div class="panel" style="margin-top:14px;">
-      <h2>Known charge codes</h2>
-      <div class="tablewrap" style="max-height:240px;"><table class="data" id="dict-table"><thead><tr><th>Keyword / phrase</th><th>Charge code</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="panel">
+      <h2>Last Mile box detail <span class="small">(optional, refines LM)</span></h2>
+      <p class="desc">Box-level charge-code breakdown. Matches "Last mile working". Replaces the shipment-level LM total where present.</p>
+      <input type="file" id="file-boxlm" accept=".csv,.xlsx,.xls">
+      <div id="boxlm-status" class="small" style="margin-top:6px;"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CHARGE CODES ===================== -->
+<section class="tabpanel" id="tab-charges">
+  <div class="panel">
+    <h2>Charge Code Master</h2>
+    <p class="desc">Grows automatically as invoice line items get entered. Not used for matching outside Last Mile yet — captured now so charge-code-level costing is possible later without re-keying history.</p>
+    <div class="tablewrap"><table class="data" id="charge-table"><thead><tr><th>Charge Code</th><th>Cost Header</th><th>Vendor</th><th>Reimbursable (default)</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ===================== INVOICES: OTHER HEADERS ===================== -->
+<section class="tabpanel" id="tab-inv-other">
+  <div class="panel">
+    <h2>New invoice — Pickup / FM / Hub / OC / MM / DC / etc.</h2>
+    <p class="desc">Tags to a group (MAWB, Node+Period, or a single shipment) and a cost header. The system compares the invoice against the sum of provisional cost across every shipment in that group.</p>
+    <div class="grid2">
+      <div>
+        <label class="field">Vendor code / name</label><input type="text" id="oi-vendor" placeholder="e.g. FREIGHTWINGS">
+        <label class="field">Invoice number</label><input type="text" id="oi-invnum">
+        <label class="field">Invoice date</label><input type="date" id="oi-date">
+        <label class="field">Currency</label><input type="text" id="oi-currency" value="INR">
+        <label class="field">Taxable amount (GST excluded)</label><input type="number" id="oi-amount">
+      </div>
+      <div>
+        <label class="field">Source document (mandatory)</label><input type="file" id="oi-source">
+        <label class="field">Backup document (optional)</label><input type="file" id="oi-backup">
+        <label class="field">Cost header</label>
+        <select id="oi-header"></select>
+        <label class="field">Group type</label>
+        <select id="oi-grouptype">
+          <option value="MAWB">MAWB</option>
+          <option value="NODE_PERIOD">Node + Period</option>
+          <option value="SHIPMENT">Single Shipment</option>
+        </select>
+        <label class="field">Group key (MAWB #, or "Node|YYYY-MM", or Shipment ID)</label>
+        <input type="text" id="oi-groupkey" placeholder="e.g. 31720205">
+        <label class="field">Entered split amount for this header (optional — blank = compare against summed group total)</label>
+        <input type="number" id="oi-entered-amount">
+      </div>
+    </div>
+    <div class="row-actions"><button class="btn teal" id="btn-create-other-invoice">Create &amp; tag invoice</button></div>
+    <div id="oi-status" class="small" style="margin-top:6px;"></div>
+  </div>
+  <div class="panel" style="margin-top:12px;">
+    <h2>Recent invoices (other headers)</h2>
+    <div id="oi-list"><div class="emptystate">None yet.</div></div>
+  </div>
+</section>
+
+<!-- ===================== INVOICES: LAST MILE ===================== -->
+<section class="tabpanel" id="tab-inv-lm">
+  <div class="panel">
+    <h2>New Last Mile invoice batch</h2>
+    <p class="desc">Structured file upload — itemized charge-code columns, or a lump ledger keyed by box ID / tracking number. Matches against box-level provisional detail.</p>
+    <label class="field">Vendor / reference</label><input type="text" id="lm-inv-name" placeholder="e.g. UPS — Aug W3">
+    <label class="field">Source document (mandatory)</label><input type="file" id="lm-source">
+    <button class="btn secondary btn-sm" id="btn-new-lm-invgroup" style="margin-top:8px;">Create batch</button>
+  </div>
+  <div class="panel" style="margin-top:12px;">
+    <h2>Last Mile invoice batches</h2>
+    <div id="lm-invgroup-list"><div class="emptystate">None yet.</div></div>
+  </div>
+  <div class="panel" style="margin-top:12px;">
+    <h2>Run Last Mile reconciliation</h2>
+    <button class="btn teal" id="btn-run-lm-recon">Refresh &amp; reconcile Last Mile</button>
+    <span class="small" id="lm-recon-note"></span>
+    <div id="lm-recon-strip"></div>
+    <div class="tablewrap"><table class="data" id="lm-recon-table"><thead><tr><th>Shipment</th><th>Box</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th class="num">Delta</th><th>Reason</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ===================== APPROVAL QUEUE ===================== -->
+<section class="tabpanel" id="tab-queue">
+  <div class="panel">
+    <p class="desc">Shows invoices where the current approval level matches your role. Approve, reject, send back, reassign, or edit tagging (with a mandatory reason).</p>
+    <div id="queue-list"><div class="emptystate">Loading…</div></div>
+  </div>
+</section>
+
+<!-- ===================== DISPUTES ===================== -->
+<section class="tabpanel" id="tab-disputes">
+  <div class="panel">
+    <h2>Raise / resolve a dispute</h2>
+    <p class="desc">The original invoice amount never changes — a dispute resolved as Agreed or Settled requires a Credit Note for the differential, entered separately.</p>
+    <div id="dispute-list"><div class="emptystate">Loading…</div></div>
+  </div>
+</section>
+
+<!-- ===================== AGING & WRITE-BACK ===================== -->
+<section class="tabpanel" id="tab-aging">
+  <div class="panel">
+    <h2>Open provisions, with aging</h2>
+    <p class="desc">Aging runs from pickup date (shipment), the oldest shipment's pickup date (MAWB), or the configured period (node/fixed pool). Select rows to write back — this removes the open liability from this view without changing the shipment's own cost record.</p>
+    <label class="field">As of date</label><input type="date" id="aging-asof" style="max-width:200px;">
+    <button class="btn secondary btn-sm" id="btn-run-aging" style="margin-top:6px;">Run aging report</button>
+    <div class="tablewrap"><table class="data" id="aging-table"><thead><tr><th><input type="checkbox" id="aging-select-all"></th><th>Shipment</th><th>Header</th><th class="num">Provisional</th><th class="num">Days open</th></tr></thead><tbody></tbody></table></div>
+    <div class="row-actions">
+      <input type="text" id="writeback-reason" placeholder="Reason for write-back (mandatory)" style="max-width:400px;">
+      <button class="btn amber btn-sm" id="btn-writeback">Write back selected</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== REPORTS ===================== -->
+<section class="tabpanel" id="tab-reports">
+  <div id="pnl-strip"></div>
+  <div class="panel"><h2>P&amp;L by LOB</h2>
+    <div class="tablewrap" style="max-height:260px;"><table class="data" id="pnl-lob-table"><thead><tr><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="panel" style="margin-top:12px;"><h2>Shipment detail</h2>
+    <input type="text" id="pnl-search" placeholder="Search shipment / LOB">
+    <div class="tablewrap"><table class="data" id="pnl-ship-table"><thead><tr><th>Shipment</th><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th>Maturity</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <button class="btn secondary btn-sm" id="btn-run-pnl" style="margin-top:10px;">Refresh P&amp;L</button>
+</section>
+
+<!-- ===================== ADMIN ===================== -->
+<section class="tabpanel" id="tab-admin">
+  <div class="grid2">
+    <div class="panel">
+      <h2>Users &amp; roles</h2>
+      <p class="desc">Users are created in the Supabase dashboard (Authentication → Users). Assign their role and, for LOB Owners, which LOB here.</p>
+      <div class="tablewrap"><table class="data" id="users-table"><thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>LOB</th><th></th></tr></thead><tbody></tbody></table></div>
       <div class="row-actions">
-        <input type="text" id="new-kw" placeholder="keyword" style="max-width:200px;">
-        <input type="text" id="new-code" placeholder="charge code" style="max-width:180px;">
-        <button class="btn secondary btn-sm" id="btn-add-kw">Add</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== RECONCILE ===================== -->
-  <section class="tabpanel" id="tab-reconcile">
-    <div class="panel" style="margin-bottom:14px; display:flex; align-items:flex-end; gap:18px; flex-wrap:wrap;">
-      <div><label class="field">Tolerance (₹)</label><input type="number" id="tol-amount" value="2" style="width:100px;"></div>
-      <div><label class="field">Tolerance (%)</label><input type="number" id="tol-pct" value="0.5" style="width:100px;"></div>
-      <button class="btn teal" id="btn-run-recon">Refresh from database &amp; run reconciliation</button>
-      <span class="small" id="recon-run-note"></span>
-    </div>
-    <div id="recon-strip"></div>
-    <div class="panel">
-      <div class="toolbar">
-        <input type="text" id="recon-search" placeholder="Search shipment / box / charge code">
-        <select id="recon-filter">
-          <option value="">All statuses</option><option value="matched">Matched</option><option value="pending">Pending actualisation</option>
-          <option value="review">Rate variance — review</option><option value="exception">Exception</option>
+        <input type="text" id="new-user-id" placeholder="user_id (from Supabase Auth)" style="max-width:220px;">
+        <input type="text" id="new-user-name" placeholder="Full name" style="max-width:160px;">
+        <select id="new-user-role">
+          <option value="FINANCE_EXECUTIVE">Finance Executive</option>
+          <option value="LOB_OWNER">LOB Owner</option>
+          <option value="FINANCE_HEAD">Finance Head</option>
+          <option value="CEO">CEO</option>
+          <option value="FINANCE_MANAGER">Finance Manager</option>
+          <option value="ADMIN">Admin</option>
         </select>
-        <button class="btn secondary btn-sm" id="btn-export-recon" style="margin-left:auto;">Export CSV</button>
-      </div>
-      <div class="tablewrap">
-        <table class="data" id="recon-table">
-          <thead><tr><th>Shipment</th><th>Box</th><th>Header</th><th>Charge code</th><th>Granularity</th><th class="num">Provisional</th><th class="num">Actual</th><th class="num">Delta</th><th>Reason</th><th>Status</th></tr></thead>
-          <tbody></tbody>
-        </table>
+        <input type="text" id="new-user-lob" placeholder="LOB (if LOB Owner)" style="max-width:140px;">
+        <button class="btn secondary btn-sm" id="btn-add-user">Add / update</button>
       </div>
     </div>
-  </section>
-
-  <!-- ===================== ACCOUNTING ===================== -->
-  <section class="tabpanel" id="tab-accounting">
-    <div class="panel desc" style="margin-bottom:14px;">Derived from the last reconciliation run. Not-yet-invoiced provisions stay on the books; matched ones get reversed and replaced by the actual invoice amount.</div>
-    <div id="acct-strip"></div>
-    <div class="grid2">
-      <div class="panel"><h2>By cost header</h2>
-        <div class="tablewrap" style="max-height:340px;"><table class="data" id="acct-header-table"><thead><tr><th>Header</th><th class="num">Provision to carry</th><th class="num">Provision to reverse</th><th class="num">Invoice booked</th></tr></thead><tbody></tbody></table></div>
-      </div>
-      <div class="panel"><h2>By LOB</h2>
-        <div class="tablewrap" style="max-height:340px;"><table class="data" id="acct-lob-table"><thead><tr><th>LOB</th><th class="num">Provision to carry</th><th class="num">Provision to reverse</th><th class="num">Invoice booked</th></tr></thead><tbody></tbody></table></div>
-      </div>
-    </div>
-    <div class="panel" style="margin-top:14px;">
-      <div class="toolbar"><span class="small">Shipment-level detail behind the numbers above.</span><button class="btn secondary btn-sm" id="btn-export-acct" style="margin-left:auto;">Export CSV</button></div>
-      <div class="tablewrap"><table class="data" id="acct-detail-table"><thead><tr><th>Shipment</th><th>LOB</th><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Movement</th></tr></thead><tbody></tbody></table></div>
-    </div>
-  </section>
-
-  <!-- ===================== P&L ===================== -->
-  <section class="tabpanel" id="tab-pnl">
-    <div id="pnl-strip"></div>
-    <div class="panel"><h2>By LOB</h2>
-      <div class="tablewrap" style="max-height:260px;"><table class="data" id="pnl-lob-table"><thead><tr><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th></tr></thead><tbody></tbody></table></div>
-    </div>
-    <div class="panel" style="margin-top:14px;">
-      <div class="toolbar"><input type="text" id="pnl-search" placeholder="Search shipment / LOB"><button class="btn secondary btn-sm" id="btn-export-pnl" style="margin-left:auto;">Export CSV</button></div>
-      <div class="tablewrap"><table class="data" id="pnl-ship-table"><thead><tr><th>Shipment</th><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th><th>Cost maturity</th></tr></thead><tbody></tbody></table></div>
-    </div>
-  </section>
-
-  <!-- ===================== AI INTEGRATION ===================== -->
-  <section class="tabpanel" id="tab-integration">
     <div class="panel">
-      <h2>Where the AI model plugs in</h2>
-      <p class="desc">Everything here runs on deterministic rules today. Three marked seams for <span class="mono">ai.xindus.net</span> — share the API spec and each drops in without touching the logic around it.</p>
-      <div class="subblock"><h3>1. Charge code mapping <span class="badge">mapChargeCodeWithAI()</span></h3><p class="small">Currently: keyword dictionary + manual review.</p></div>
-      <div class="subblock"><h3>2. Shipment # extraction from PDFs <span class="badge">extractShipmentFromPDFWithAI()</span></h3><p class="small">Not wired into this pilot build — structured file upload only for now.</p></div>
-      <div class="subblock"><h3>3. Variance narrative <span class="badge">explainVarianceWithAI()</span></h3><p class="small">Currently: a fixed reason code per row.</p></div>
-      <div class="note">This pilot build is meant to prove the reconciliation rules and accounting outputs on real data for 2–3 weeks. When your engineering team takes over, the tables in <span class="mono">schema.sql</span> and the two DB-integration stubs (<span class="mono">fetchBoxLMFromDB</span>, and eventually a shipment-level DB source) are the handover points.</div>
+      <h2>Approval thresholds by LOB × Cost Header</h2>
+      <p class="desc">Escalation is AND-gated: both the % AND the value must be breached to move up a level.</p>
+      <div class="tablewrap" style="max-height:400px;"><table class="data" id="threshold-table"><thead><tr><th>LOB</th><th>Header</th><th class="num">FH %</th><th class="num">FH ₹</th><th class="num">CEO %</th><th class="num">CEO ₹</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
-  </section>
+  </div>
+</section>
+
 </main>
+</div>
+
+<div class="modalbg" id="tagedit-modal">
+  <div class="modal">
+    <button class="closebtn" id="tagedit-close">&times;</button>
+    <h3 style="margin-top:0;">Edit tagging</h3>
+    <label class="field">Cost header</label><select id="te-header"></select>
+    <label class="field">Group type</label>
+    <select id="te-grouptype"><option value="MAWB">MAWB</option><option value="NODE_PERIOD">Node + Period</option><option value="SHIPMENT">Shipment</option></select>
+    <label class="field">Group key</label><input type="text" id="te-groupkey">
+    <label class="field">Reason for change (mandatory)</label><textarea id="te-reason"></textarea>
+    <div class="row-actions"><button class="btn teal" id="te-save">Save edit</button></div>
+  </div>
+</div>
+
+<div class="modalbg" id="colmap-modal">
+  <div class="modal">
+    <button class="closebtn" id="colmap-close">&times;</button>
+    <h3 style="margin-top:0;">Map columns</h3>
+    <p class="small">Your file's columns, left. Assign each to a system field, right. Repeated or oddly-named source columns are exactly why this step exists — pick by content, not by name.</p>
+    <div class="tablewrap" style="max-height:420px;"><table class="data" id="colmap-table"><thead><tr><th>Source column (sample value)</th><th>Maps to</th></tr></thead><tbody></tbody></table></div>
+    <div class="row-actions"><button class="btn teal" id="colmap-confirm">Confirm mapping &amp; import</button></div>
+  </div>
 </div>
 
 <script>
 /* ============================= SUPABASE INIT ============================= */
 const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let CURRENT_USER = null, CURRENT_PROFILE = null;
 
 /* ============================= CONSTANTS ============================= */
-const HEADERS = ['PICKUP','FM','HUB','OC','MM','OCEAN','TRANSSHIP','DC','DESTCLEAR','IOR','DROPOFF','LM'];
-const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Customs',MM:'Middle Mile',OCEAN:'Ocean',
-  TRANSSHIP:'Trans-shipment',DC:'Destination Handling',DESTCLEAR:'Destination Clearance',IOR:'IOR',DROPOFF:'Dropoff',LM:'Last Mile'};
-const SHIP_COL_TO_HEADER = {
-  'pickup cost':'PICKUP', 'fm cost':'FM', 'hub cost':'HUB', 'oc cost':'OC', 'mm cost':'MM',
-  'uk to usa mm':'MM', 'ocean cost':'OCEAN', 'trans shipment cost':'TRANSSHIP',
-  'dc cost':'DC', 'destination clearance cost':'DESTCLEAR', 'ior cost':'IOR', 'dropoff cost':'DROPOFF', 'lm cost':'LM'
-};
+const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Customs',MM:'Middle Mile',
+  DC:'Destination Handling',DESTCLEAR:'Destination Clearance',IOR:'IOR',OCEAN:'Ocean',TRANSSHIP:'Trans-shipment',
+  LM_PICKUP:'LM Pickup',LM:'Last Mile',AGGREGATION:'Aggregation',INDIA_UK_MM:'India to UK MM'};
+const HEADER_GRAIN = {PICKUP:'NODE_PERIOD',FM:'NODE_PERIOD',HUB:'NODE_PERIOD',OC:'MAWB',MM:'MAWB',DC:'MAWB',
+  DESTCLEAR:'MAWB',IOR:'MAWB',OCEAN:'MAWB',TRANSSHIP:'MAWB',LM_PICKUP:'SHIPMENT',LM:'SHIPMENT',
+  AGGREGATION:'SHIPMENT',INDIA_UK_MM:'MAWB'};
+const APPROVAL_CHAIN = ['LOB_OWNER','FINANCE_HEAD','CEO'];
 const LM_COL_TO_CODE = {
-  'base cost':'LM_BASE', 'fuel surcharge':'LM_FUEL', 'residentital surcharge ups':'LM_RES', 'residential surcharge':'LM_RES',
-  'das charges ups / fedex':'LM_DAS', 'addl wight handle charges':'LM_ADDLWT',
-  'over dim surcharges ups & fedex,amazon ground':'LM_OVERDIM_A', 'over dim surcharges usps, dhl & pandion,shipx ground':'LM_OVERDIM_B',
-  'over dim bt,uniuni,fedex':'LM_OVERDIM_C', 'boxc dhl additonal cost':'LM_BOXC_DHL', 'peak surcharge':'LM_PEAK', 'packaging surcharge':'LM_PACKAGING'
+  'base cost':'LM_BASE','fuel surcharge':'LM_FUEL','residentital surcharge ups':'LM_RES','residential surcharge':'LM_RES',
+  'das charges ups / fedex':'LM_DAS','addl wight handle charges':'LM_ADDLWT',
+  'over dim surcharges ups & fedex,amazon ground':'LM_OVERDIM_A','over dim surcharges usps, dhl & pandion,shipx ground':'LM_OVERDIM_B',
+  'over dim bt,uniuni,fedex':'LM_OVERDIM_C','boxc dhl additonal cost':'LM_BOXC_DHL','peak surcharge':'LM_PEAK','packaging surcharge':'LM_PACKAGING'
 };
 
-/* ============================= STATE (rebuilt from Supabase on each run) ============================= */
-const state = {
-  provisionalShipments: new Map(),
-  provisionalBoxLM: [],
-  invoiceGroups: [],
-  invoices: [],
-  chargeCodeDict: {},
-  reconciliation: [],
-  settings: { toleranceAmount:2, tolerancePct:0.5 }
-};
-
-/* ============================= HELPERS ============================= */
-function fmt(n){ if(n===undefined||n===null||isNaN(n)) return '—'; return '₹'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
-function num(v){ if(v===undefined||v===null||v==='') return NaN; const s=String(v).replace(/[₹,\s]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:Math.abs(n); }
+function fmt(n){ if(n===undefined||n===null||isNaN(n)) return '—'; return Number(n).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
+function num(v){ if(v===undefined||v===null||v==='') return NaN; const s=String(v).replace(/[₹,\s]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:n; }
 function normHeader(h){ return String(h||'').trim().toLowerCase(); }
-const ALIASES = {
-  shipmentId: ['awb','shipment id','shipmentid','shipment#','shipment','shipment no'],
-  boxId: ['box id','boxid','box','boxes','piece id'],
-  lob: ['lob','line of business'], node: ['node'], pickupDate: ['pickup date','pickup_date'],
-  grossWeight: ['gross weight'], revenue: ['correct rev','revenue'],
-  refKey: ['ref number','reference number','tracking number','ref no'],
-  chargeCode: ['charge code','nature of service','service','description','charge description']
-};
-function findCol(keys, aliasList){ return keys.find(k=> aliasList.includes(normHeader(k)) || aliasList.some(a=>normHeader(k).includes(a))); }
-function deriveFromRef(ref){ const s=String(ref).trim(); const m=s.match(/^(.*?)(B\d{1,3})$/i); return m? {shipmentId:m[1], boxId:s} : {shipmentId:s, boxId:''}; }
+function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function daysBetween(a,b){ return Math.floor((new Date(b) - new Date(a)) / 86400000); }
+
 function parseTabularFile(file){
   return new Promise((resolve, reject)=>{
     const ext = file.name.split('.').pop().toLowerCase();
-    if(ext==='csv'){ Papa.parse(file,{header:true, skipEmptyLines:true, complete:res=>resolve(res.data), error:reject}); }
+    if(ext==='csv'){ Papa.parse(file,{header:true, skipEmptyLines:true, complete:res=>resolve({rows:res.data, headers:res.meta.fields}), error:reject}); }
     else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
-      reader.onload = e=>{ try{ const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'}); const sheet=wb.Sheets[wb.SheetNames[0]]; resolve(XLSX.utils.sheet_to_json(sheet,{defval:''})); }catch(err){reject(err);} };
+      reader.onload = e=>{ try{
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+          const sheet=wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
+          const headers = rows[0].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
+          const objRows = rows.slice(1).map(r=>{ const o={}; headers.forEach((h,i)=>o[h]=r[i]); return o; });
+          resolve({rows:objRows, headers});
+        }catch(err){reject(err);} };
       reader.onerror = reject; reader.readAsArrayBuffer(file);
     } else reject(new Error('Unsupported file type: '+ext));
   });
 }
-function showErr(elId, msg){ const el=document.getElementById(elId); el.textContent = msg; }
 
-/* --------------------- AI INTEGRATION STUBS --------------------- */
-async function mapChargeCodeWithAI(rawText){ return null; } // TODO(engineering): call ai.xindus.net
-async function explainVarianceWithAI(row){ return null; }   // TODO(engineering)
+async function uploadDoc(file, folder){
+  if(!file) return null;
+  const path = `${folder}/${Date.now()}_${file.name}`;
+  const { error } = await sbClient.storage.from('invoice-documents').upload(path, file);
+  if(error){ console.error(error); return null; }
+  return path;
+}
 
 /* ============================= AUTH ============================= */
 document.getElementById('btn-login').addEventListener('click', doLogin);
@@ -342,491 +383,615 @@ async function doLogin(){
   if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
   await onLoggedIn(data.session);
 }
-document.getElementById('btn-logout').addEventListener('click', async ()=>{
-  await sbClient.auth.signOut();
-  document.getElementById('app-screen').style.display='none';
-  document.getElementById('login-screen').style.display='flex';
-});
+document.getElementById('btn-logout').addEventListener('click', async ()=>{ await sbClient.auth.signOut(); location.reload(); });
 async function onLoggedIn(session){
+  CURRENT_USER = session.user;
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app-screen').style.display='block';
-  document.getElementById('who-label').textContent = session.user.email;
-  await loadDictionary();
-  await loadInvoiceGroupsAndCounts();
+  const { data: prof } = await sbClient.from('user_profiles').select('*').eq('user_id', CURRENT_USER.id).maybeSingle();
+  CURRENT_PROFILE = prof || {role:'FINANCE_EXECUTIVE'};
+  document.getElementById('who-label').textContent = `${session.user.email} · ${CURRENT_PROFILE.role}${CURRENT_PROFILE.lob?(' · '+CURRENT_PROFILE.lob):''}`;
+  await loadCostHeaderOptions();
+  await loadChargeCodes();
+  await loadOtherInvoices();
+  await loadLMInvoiceGroups();
+  await loadQueue();
+  await loadDisputes();
+  await loadUsersAndThresholds();
 }
-(async function initAuth(){
-  const { data } = await sbClient.auth.getSession();
-  if(data.session){ await onLoggedIn(data.session); }
-})();
+(async function initAuth(){ const { data } = await sbClient.auth.getSession(); if(data.session) await onLoggedIn(data.session); })();
 
-/* ============================= PROVISIONAL: SHIPMENT LEVEL ============================= */
+/* ============================= COST HEADER OPTIONS ============================= */
+async function loadCostHeaderOptions(){
+  const { data } = await sbClient.from('cost_headers').select('*').order('code');
+  const opts = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
+  document.getElementById('oi-header').innerHTML = opts;
+  document.getElementById('te-header').innerHTML = opts;
+}
+
+/* ============================= SHIPMENT UPLOAD WITH COLUMN MAPPING ============================= */
+const SYSTEM_FIELDS = [
+  {key:'shipment_id', label:'Shipment ID'}, {key:'lob', label:'LOB'}, {key:'node', label:'Node'},
+  {key:'pickup_date', label:'Pickup Date'}, {key:'mawb', label:'MAWB'}, {key:'gross_weight', label:'Gross Weight'},
+  {key:'revenue_amount', label:'Revenue Amount'}, {key:'revenue_currency', label:'Revenue Currency'},
+  {key:'IGNORE', label:'— ignore —'},
+  {key:'H:PICKUP', label:'Cost: Pickup'}, {key:'H:FM', label:'Cost: First Mile'}, {key:'H:HUB', label:'Cost: Hub'},
+  {key:'H:OC', label:'Cost: Origin Customs'}, {key:'H:MM', label:'Cost: Middle Mile'}, {key:'H:DC', label:'Cost: Destination Handling'},
+  {key:'H:DESTCLEAR', label:'Cost: Destination Clearance'}, {key:'H:IOR', label:'Cost: IOR'}, {key:'H:OCEAN', label:'Cost: Ocean'},
+  {key:'H:TRANSSHIP', label:'Cost: Trans-shipment'}, {key:'H:LM_PICKUP', label:'Cost: LM Pickup'}, {key:'H:LM', label:'Cost: Last Mile'},
+  {key:'H:AGGREGATION', label:'Cost: Aggregation'}, {key:'H:INDIA_UK_MM', label:'Cost: India-UK MM'}
+];
+const FIELD_GUESS = {
+  'awb number':'shipment_id','shipment id':'shipment_id','awb':'shipment_id',
+  'lob':'lob','node':'node','pickup date':'pickup_date','masterawb':'mawb','mawb':'mawb',
+  'gross weight':'gross_weight','revenue':'revenue_amount','correct revenue':'revenue_amount','gmv':'IGNORE',
+  'pickup cost':'H:PICKUP','fm cost':'H:FM','hub cost':'H:HUB','oc cost':'H:OC','mm cost':'H:MM','dc cost':'H:DC',
+  'destination clearance cost':'H:DESTCLEAR','ior cost':'H:IOR','ocean cost':'H:OCEAN','trans shipment cost':'H:TRANSSHIP',
+  'lm pickup cost':'H:LM_PICKUP','lm cost':'H:LM','aggreation cost':'H:AGGREGATION','aggregation cost':'H:AGGREGATION',
+  'india to uk mm':'H:INDIA_UK_MM'
+};
+let pendingShipFile = null, pendingShipParsed = null, pendingShipMapping = {};
+
 document.getElementById('file-ship').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
+  pendingShipFile = file;
   document.getElementById('ship-status').textContent = 'Parsing…';
   try{
-    const raw = await parseTabularFile(file);
-    const keys = raw.length ? Object.keys(raw[0]) : [];
-    const shipCol = findCol(keys, ALIASES.shipmentId);
-    const lobCol = findCol(keys, ALIASES.lob), nodeCol = findCol(keys, ALIASES.node),
-          pdCol = findCol(keys, ALIASES.pickupDate), gwCol = findCol(keys, ALIASES.grossWeight), revCol = findCol(keys, ALIASES.revenue);
-    if(!shipCol){ document.getElementById('ship-status').textContent = 'Could not find a shipment ID column.'; return; }
-    const headerCols = {};
-    HEADERS.forEach(h=>{ const src = Object.keys(SHIP_COL_TO_HEADER).find(hc=>SHIP_COL_TO_HEADER[hc]===h); headerCols[h] = keys.find(k=> normHeader(k)===src); });
-
-    // De-duplicate by shipment_id (and shipment_id+header for costs) BEFORE upserting —
-    // Postgres upsert rejects a batch that touches the same conflict-key row twice.
-    // Later rows in the file win over earlier ones with the same key.
-    const shipmentMap = new Map(), costMap = new Map();
-    let duplicateShipmentRows = 0;
-    raw.forEach(row=>{
-      if(!row[shipCol]) return;
-      const shipmentId = String(row[shipCol]).trim();
-      if(shipmentMap.has(shipmentId)) duplicateShipmentRows++;
-      shipmentMap.set(shipmentId, {
-        shipment_id: shipmentId,
-        lob: lobCol ? String(row[lobCol]).trim() : null,
-        node: nodeCol ? String(row[nodeCol]) : null,
-        pickup_date: pdCol ? String(row[pdCol]) : null,
-        gross_weight: gwCol ? (isNaN(num(row[gwCol]))?null:num(row[gwCol])) : null,
-        revenue: revCol ? (isNaN(num(row[revCol]))?null:num(row[revCol])) : null
-      });
-      HEADERS.forEach(h=>{
-        const col = headerCols[h];
-        if(col!==undefined && row[col]!=='' && row[col]!==undefined){
-          const v = num(row[col]);
-          if(!isNaN(v)) costMap.set(`${shipmentId}|${h}`, {shipment_id:shipmentId, header:h, amount:v, source_file:file.name});
-        }
-      });
-    });
-    const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()];
-    if(duplicateShipmentRows){
-      document.getElementById('ship-status').textContent = `Note: ${duplicateShipmentRows} shipment ID(s) appeared more than once in this file — kept the last occurrence for each, discarded the earlier ones. Worth checking the source export for why.`;
-    }
-
-    document.getElementById('ship-status').textContent += (duplicateShipmentRows?' ':'') + `Saving ${shipmentRows.length} shipments…`;
-    for(const chunk of chunkArray(shipmentRows, 500)){
-      const { error } = await sbClient.from('shipments').upsert(chunk, {onConflict:'shipment_id'});
-      if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
-    }
-    for(const chunk of chunkArray(costRows, 500)){
-      const { error } = await sbClient.from('shipment_costs').upsert(chunk, {onConflict:'shipment_id,header'});
-      if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
-    }
-    document.getElementById('ship-status').textContent = `${shipmentRows.length} shipments, ${costRows.length} cost lines saved to the database.`;
+    pendingShipParsed = await parseTabularFile(file);
+    openColumnMapModal();
   }catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
 });
-function chunkArray(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
-
-/* ============================= PROVISIONAL: LM BOX DETAIL ============================= */
-async function fetchBoxLMFromDB(){
-  // TODO(engineering): replace with the real internal DB call.
-  // Expected resolved shape: [{ shipmentId, boxId, chargeCode, amount }, ...]
-  return [];
+function openColumnMapModal(){
+  const tb = document.querySelector('#colmap-table tbody'); tb.innerHTML='';
+  const sampleRow = pendingShipParsed.rows[0] || {};
+  pendingShipParsed.headers.forEach((h, idx)=>{
+    const guessKey = FIELD_GUESS[normHeader(h)] || 'IGNORE';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><b>${h}</b><br><span class="small">${String(sampleRow[h]).slice(0,40)}</span></td>
+      <td><select data-col="${h}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select></td>`;
+    tb.appendChild(tr);
+  });
+  document.getElementById('colmap-modal').classList.add('open');
 }
-document.getElementById('btn-fetch-db').addEventListener('click', async ()=>{
-  document.getElementById('db-status').textContent = 'Contacting internal database…';
-  const recs = await fetchBoxLMFromDB();
-  if(!recs.length){ document.getElementById('db-status').textContent = 'No connection configured yet — this is the integration point above.'; return; }
-  const rows = recs.map(r=>({shipment_id:r.shipmentId, box_id:r.boxId, charge_code:r.chargeCode, amount:r.amount, source:'db'}));
-  const { error } = await sbClient.from('box_lm_costs').insert(rows);
-  document.getElementById('db-status').textContent = error ? ('Save failed: '+error.message) : `${rows.length} box-level LM records saved.`;
+document.getElementById('colmap-close').addEventListener('click', ()=> document.getElementById('colmap-modal').classList.remove('open'));
+document.getElementById('colmap-confirm').addEventListener('click', async ()=>{
+  const selects = document.querySelectorAll('#colmap-table select');
+  pendingShipMapping = {};
+  selects.forEach(s=>{ pendingShipMapping[s.dataset.col] = s.value; });
+  document.getElementById('colmap-modal').classList.remove('open');
+  await importShipmentsWithMapping();
 });
+async function importShipmentsWithMapping(){
+  const rows = pendingShipParsed.rows;
+  const shipmentMap = new Map(), costMap = new Map();
+  let dupCount = 0;
+  rows.forEach(row=>{
+    let shipmentId=null, lob=null, node=null, pickupDate=null, mawb=null, grossWeight=null, revenue=null, revCcy='INR';
+    const costs = {};
+    for(const col in pendingShipMapping){
+      const field = pendingShipMapping[col];
+      const val = row[col];
+      if(field==='IGNORE') continue;
+      if(field==='shipment_id') shipmentId = val ? String(val).trim() : null;
+      else if(field==='lob') lob = val ? String(val).trim() : null;
+      else if(field==='node') node = val;
+      else if(field==='pickup_date') pickupDate = val;
+      else if(field==='mawb') mawb = val ? String(val).trim() : null;
+      else if(field==='gross_weight') grossWeight = num(val);
+      else if(field==='revenue_amount') revenue = num(val);
+      else if(field==='revenue_currency') revCcy = val || 'INR';
+      else if(field.startsWith('H:')){ const code = field.slice(2); const v = num(val); if(!isNaN(v)) costs[code]=v; }
+    }
+    if(!shipmentId) return;
+    if(shipmentMap.has(shipmentId)) dupCount++;
+    shipmentMap.set(shipmentId, {shipment_id:shipmentId, lob, node, pickup_date: pickupDate ? String(pickupDate).slice(0,10) : null,
+      mawb, gross_weight: isNaN(grossWeight)?null:grossWeight, revenue_amount: isNaN(revenue)?null:revenue, revenue_currency: revCcy});
+    Object.entries(costs).forEach(([code,amt])=> costMap.set(`${shipmentId}|${code}`, {shipment_id:shipmentId, cost_header:code, provisional_amount:amt}));
+  });
+  const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()];
+  document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…` + (dupCount?` (${dupCount} duplicate shipment IDs in file — kept last occurrence)`:'');
+  for(const chunk of chunkArray(shipmentRows,500)){
+    const { error } = await sbClient.from('shipments').upsert(chunk, {onConflict:'shipment_id'});
+    if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
+  }
+  for(const chunk of chunkArray(costRows,500)){
+    const { error } = await sbClient.from('shipment_costs').upsert(
+      chunk.map(c=>({...c, status:'OPEN'})), {onConflict:'shipment_id,cost_header', ignoreDuplicates:false});
+    if(error){ document.getElementById('ship-status').textContent = 'Cost save failed: '+error.message; return; }
+  }
+  document.getElementById('ship-status').textContent = `${shipmentRows.length} shipments, ${costRows.length} cost lines saved.`;
+}
+
+/* ============================= LM BOX UPLOAD (unchanged mechanism) ============================= */
 document.getElementById('file-boxlm').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   document.getElementById('boxlm-status').textContent = 'Parsing…';
   try{
-    const raw = await parseTabularFile(file);
-    const keys = raw.length ? Object.keys(raw[0]) : [];
-    const boxCol = findCol(keys, ALIASES.boxId);
-    const shipCol = findCol(keys, ['scancode','shipment id','awb']);
+    const {rows, headers} = await parseTabularFile(file);
+    const boxCol = headers.find(h=>['boxes','box id','box'].includes(normHeader(h)));
+    const shipCol = headers.find(h=>['scancode','shipment id','awb'].includes(normHeader(h)));
     if(!boxCol){ document.getElementById('boxlm-status').textContent = 'Could not find a box ID column.'; return; }
     const codeCols = {};
-    keys.forEach(k=>{ const nk=normHeader(k); const match = Object.keys(LM_COL_TO_CODE).find(c=> nk===c || nk.includes(c)); if(match) codeCols[k]=LM_COL_TO_CODE[match]; });
-    const rows = [];
-    raw.forEach(row=>{
+    headers.forEach(h=>{ const nk=normHeader(h); const match = Object.keys(LM_COL_TO_CODE).find(c=>nk===c||nk.includes(c)); if(match) codeCols[h]=LM_COL_TO_CODE[match]; });
+    const out = [];
+    rows.forEach(row=>{
       if(!row[boxCol]) return;
       const boxId = String(row[boxCol]).trim();
-      const shipmentId = shipCol && row[shipCol] ? String(row[shipCol]).trim() : deriveFromRef(boxId).shipmentId;
-      Object.entries(codeCols).forEach(([col,code])=>{
-        const v = num(row[col]);
-        if(!isNaN(v) && v!==0) rows.push({shipment_id:shipmentId, box_id:boxId, charge_code:code, amount:v, source:'file'});
-      });
+      const shipmentId = shipCol && row[shipCol] ? String(row[shipCol]).trim() : boxId.replace(/B\d+$/i,'');
+      Object.entries(codeCols).forEach(([col,code])=>{ const v=num(row[col]); if(!isNaN(v) && v!==0) out.push({shipment_id:shipmentId, box_id:boxId, charge_code:code, amount:v, status:'OPEN'}); });
     });
-    document.getElementById('boxlm-status').textContent = `Saving ${rows.length} rows…`;
-    for(const chunk of chunkArray(rows, 500)){
-      const { error } = await sbClient.from('box_lm_costs').insert(chunk);
-      if(error){ document.getElementById('boxlm-status').textContent = 'Save failed: '+error.message; return; }
-    }
-    document.getElementById('boxlm-status').textContent = `${rows.length} charge-code rows saved from ${file.name}.`;
+    for(const chunk of chunkArray(out,500)){ const {error} = await sbClient.from('box_lm_costs').insert(chunk); if(error){ document.getElementById('boxlm-status').textContent='Save failed: '+error.message; return; } }
+    document.getElementById('boxlm-status').textContent = `${out.length} rows saved from ${file.name}.`;
   }catch(err){ document.getElementById('boxlm-status').textContent = 'Could not read file: '+err.message; }
 });
 
-/* ============================= INVOICE SOURCE ============================= */
-document.getElementById('btn-new-invgroup').addEventListener('click', async ()=>{
-  const name = document.getElementById('new-inv-name').value.trim();
-  const costHeader = document.getElementById('new-inv-header').value;
-  if(!name) return;
-  const id = 'grp_'+Date.now();
-  const { error } = await sbClient.from('invoice_groups').insert({id, name, cost_header:costHeader});
-  if(error){ alert('Could not create batch: '+error.message); return; }
-  document.getElementById('new-inv-name').value='';
-  await loadInvoiceGroupsAndCounts();
-});
-async function loadInvoiceGroupsAndCounts(){
-  const { data: groups, error } = await sbClient.from('invoice_groups').select('*').order('created_at');
-  if(error){ document.getElementById('invgroup-list').innerHTML = '<div class="note err">Could not load invoice batches: '+error.message+'</div>'; return; }
-  state.invoiceGroups = groups || [];
-  const wrap = document.getElementById('invgroup-list');
-  if(!state.invoiceGroups.length){ wrap.innerHTML='<div class="emptystate">No invoice batches yet.</div>'; return; }
-  wrap.innerHTML='';
-  for(const g of state.invoiceGroups){
-    const { count } = await sbClient.from('invoice_lines').select('*', {count:'exact', head:true}).eq('invoice_group_id', g.id);
-    const { data: fileRows } = await sbClient.from('invoice_lines').select('file_name').eq('invoice_group_id', g.id);
-    const files = [...new Set((fileRows||[]).map(r=>r.file_name).filter(Boolean))];
-    const div = document.createElement('div'); div.className='invgroup';
-    div.innerHTML = `
-      <div class="hd"><div class="name">${g.name} <span class="small">(${HEADER_LABEL[g.cost_header]||g.cost_header})</span></div><span class="small">${count||0} lines</span></div>
-      <div class="files">${files.map(f=>`<span>${f}</span>`).join('') || 'No files attached yet'}</div>
-      <div class="row-actions">
-        <label class="btn secondary btn-sm" style="cursor:pointer;">Attach file (CSV/XLSX)
-          <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-grp="${g.id}" data-header="${g.cost_header}" class="attach-structured">
-        </label>
-      </div>`;
-    wrap.appendChild(div);
+/* ============================= CHARGE CODE MASTER ============================= */
+async function loadChargeCodes(){
+  const { data } = await sbClient.from('charge_code_master').select('*').order('charge_code');
+  const tb = document.querySelector('#charge-table tbody'); tb.innerHTML='';
+  (data||[]).forEach(c=>{ tb.innerHTML += `<tr><td class="mono">${c.charge_code}</td><td>${HEADER_LABEL[c.cost_header]||c.cost_header||''}</td><td>${c.vendor_code||''}</td><td>${c.reimbursable_default?'Yes':'No'}</td></tr>`; });
+  if(!data || !data.length) tb.innerHTML = '<tr><td colspan="4" class="small">None yet — created automatically as invoice lines are entered.</td></tr>';
+}
+async function ensureChargeCode(code, header, vendor){
+  if(!code) return;
+  await sbClient.from('charge_code_master').upsert({charge_code:code, cost_header:header, vendor_code:vendor}, {onConflict:'charge_code', ignoreDuplicates:true});
+}
+
+/* ============================= VENDOR (lightweight, grows on the go) ============================= */
+async function ensureVendor(code){
+  if(!code) return;
+  await sbClient.from('vendors').upsert({code, name:code}, {onConflict:'code', ignoreDuplicates:true});
+}
+
+/* ============================= OTHER-HEADER INVOICES ============================= */
+document.getElementById('btn-create-other-invoice').addEventListener('click', async ()=>{
+  const vendor = document.getElementById('oi-vendor').value.trim();
+  const invnum = document.getElementById('oi-invnum').value.trim();
+  const date = document.getElementById('oi-date').value;
+  const currency = document.getElementById('oi-currency').value.trim() || 'INR';
+  const amount = num(document.getElementById('oi-amount').value);
+  const sourceFile = document.getElementById('oi-source').files[0];
+  const backupFile = document.getElementById('oi-backup').files[0];
+  const header = document.getElementById('oi-header').value;
+  const groupType = document.getElementById('oi-grouptype').value;
+  const groupKey = document.getElementById('oi-groupkey').value.trim();
+  const enteredAmt = document.getElementById('oi-entered-amount').value ? num(document.getElementById('oi-entered-amount').value) : null;
+  const statusEl = document.getElementById('oi-status');
+
+  if(!vendor || isNaN(amount) || !sourceFile || !groupKey){ statusEl.textContent = 'Vendor, taxable amount, source document, and group key are all required.'; return; }
+  statusEl.textContent = 'Checking for duplicate invoice number…';
+  await ensureVendor(vendor);
+
+  // duplicate vendor+invoice_number check — never blocks, flags for review
+  let duplicateOf = null;
+  if(invnum){
+    const { data: dupes } = await sbClient.from('invoices').select('id').eq('vendor_code', vendor).eq('invoice_number', invnum);
+    if(dupes && dupes.length) duplicateOf = dupes[0].id;
   }
-  wrap.querySelectorAll('.attach-structured').forEach(inp=>{
+
+  statusEl.textContent = 'Uploading source document…';
+  const sourcePath = await uploadDoc(sourceFile, 'other-header');
+  const backupPath = backupFile ? await uploadDoc(backupFile, 'other-header') : null;
+  if(!sourcePath){ statusEl.textContent = 'Source document upload failed — check the invoice-documents storage bucket exists.'; return; }
+
+  const { data: invRow, error: invErr } = await sbClient.from('invoices').insert({
+    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency, taxable_amount:amount,
+    source_file_path:sourcePath, backup_file_path:backupPath, status:'DRAFT', entered_by: CURRENT_USER.id,
+    duplicate_of_invoice_id: duplicateOf
+  }).select().single();
+  if(invErr){ statusEl.textContent = 'Could not create invoice: '+invErr.message; return; }
+
+  await sbClient.from('invoice_tags').insert({
+    invoice_id: invRow.id, cost_header: header, group_type: groupType, group_key: groupKey,
+    entered_amount: enteredAmt, status:'LOCKED', tagged_by: CURRENT_USER.id
+  });
+  await lockGroupCosts(header, groupType, groupKey, invRow.id);
+  await routeInvoiceForApproval(invRow.id);
+  await logAction(invRow.id, 'ENTERED', null, CURRENT_USER.id, null);
+
+  statusEl.textContent = `Invoice #${invRow.id} created and tagged. ` + (duplicateOf ? `NOTE: vendor+invoice number matches invoice #${duplicateOf} — flagged for review.` : '') + ' Sent for approval.';
+  document.getElementById('oi-vendor').value=''; document.getElementById('oi-invnum').value=''; document.getElementById('oi-amount').value='';
+  document.getElementById('oi-groupkey').value=''; document.getElementById('oi-entered-amount').value='';
+  await loadOtherInvoices(); await loadQueue();
+});
+
+async function lockGroupCosts(header, groupType, groupKey, invoiceId){
+  let shipmentIds = [];
+  if(groupType==='SHIPMENT') shipmentIds = [groupKey];
+  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id').eq('mawb', groupKey); shipmentIds = (data||[]).map(s=>s.shipment_id); }
+  else if(groupType==='NODE_PERIOD'){ const [node, period] = groupKey.split('|'); const {data} = await sbClient.from('shipments').select('shipment_id').eq('node', node).gte('pickup_date', period+'-01').lt('pickup_date', period+'-32'); shipmentIds = (data||[]).map(s=>s.shipment_id); }
+  if(!shipmentIds.length) return;
+  for(const chunk of chunkArray(shipmentIds, 200)){
+    await sbClient.from('shipment_costs').update({status:'LOCKED', locked_by_invoice_id: invoiceId}).eq('cost_header', header).in('shipment_id', chunk).eq('status','OPEN');
+  }
+}
+
+async function getGroupProvisionalSum(header, groupType, groupKey){
+  let shipmentIds = [];
+  if(groupType==='SHIPMENT') shipmentIds = [groupKey];
+  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('mawb', groupKey); return summarize(data, header); }
+  else if(groupType==='NODE_PERIOD'){ const [node, period] = groupKey.split('|'); const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('node', node).gte('pickup_date', period+'-01').lt('pickup_date', period+'-32'); return summarize(data, header); }
+  const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').in('shipment_id', shipmentIds);
+  return summarize(data, header);
+
+  async function summarize(shipRows, header){
+    const ids = (shipRows||[]).map(s=>s.shipment_id);
+    const totalWeight = (shipRows||[]).reduce((s,r)=> s+(r.gross_weight||0), 0);
+    if(!ids.length) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
+    let sum = 0; const weights = {};
+    for(const chunk of chunkArray(ids,200)){
+      const {data} = await sbClient.from('shipment_costs').select('shipment_id, provisional_amount').eq('cost_header', header).in('shipment_id', chunk);
+      (data||[]).forEach(r=> sum += (r.provisional_amount||0));
+    }
+    (shipRows||[]).forEach(r=> weights[r.shipment_id] = r.gross_weight||0);
+    return {sum, shipmentIds: ids, weights, totalWeight};
+  }
+}
+
+async function routeInvoiceForApproval(invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
+  let worstPct = 0, worstVal = 0; const lobsInvolved = new Set();
+  for(const tag of tags){
+    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+    const delta = actual - summary.sum;
+    const pct = summary.sum!==0 ? Math.abs(delta/summary.sum*100) : (actual!==0?100:0);
+    if(Math.abs(delta) > worstVal || pct > worstPct){ worstVal = Math.max(worstVal, Math.abs(delta)); worstPct = Math.max(worstPct, pct); }
+    for(const sid of summary.shipmentIds){
+      const {data:s} = await sbClient.from('shipments').select('lob').eq('shipment_id', sid).maybeSingle();
+      if(s && s.lob) lobsInvolved.add(s.lob);
+    }
+  }
+  const isMultiLob = lobsInvolved.size > 1;
+  let level = 'LOB_OWNER';
+  if(isMultiLob){ level = 'FINANCE_HEAD'; }
+  else {
+    const lob = [...lobsInvolved][0] || null;
+    const header = tags[0] ? tags[0].cost_header : null;
+    const { data: th } = await sbClient.from('approval_thresholds').select('*').eq('lob', lob).eq('cost_header', header).maybeSingle();
+    if(th){
+      if(worstPct >= th.ceo_pct && worstVal >= th.ceo_value) level = 'CEO';
+      else if(worstPct >= th.finance_head_pct && worstVal >= th.finance_head_value) level = 'FINANCE_HEAD';
+    }
+  }
+  await sbClient.from('invoices').update({status:'PENDING_APPROVAL', current_level: level, is_multi_lob: isMultiLob}).eq('id', invoiceId);
+}
+
+async function loadOtherInvoices(){
+  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').order('created_at', {ascending:false}).limit(30);
+  const wrap = document.getElementById('oi-list');
+  const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM'));
+  if(!others.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
+  wrap.innerHTML = others.map(inv=>`
+    <div class="invcard">
+      <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code} ${inv.invoice_number||''}</div><span class="status-pill st-${(inv.status||'').toLowerCase()}">${inv.status}</span></div>
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} · Level: ${inv.current_level||'—'} ${inv.is_multi_lob?'· <b>multi-LOB</b>':''} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''}</div>
+      <div class="meta">${inv.invoice_tags.map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
+    </div>`).join('');
+}
+
+/* ============================= LAST MILE INVOICES (reuse pilot mechanism) ============================= */
+document.getElementById('btn-new-lm-invgroup').addEventListener('click', async ()=>{
+  const name = document.getElementById('lm-inv-name').value.trim();
+  const sourceFile = document.getElementById('lm-source').files[0];
+  if(!name || !sourceFile){ alert('Name and source document are both required.'); return; }
+  const sourcePath = await uploadDoc(sourceFile, 'last-mile');
+  const { data: invRow, error } = await sbClient.from('invoices').insert({
+    vendor_code:name, taxable_amount:0, currency:'INR', source_file_path:sourcePath, status:'DRAFT', entered_by:CURRENT_USER.id
+  }).select().single();
+  if(error){ alert(error.message); return; }
+  document.getElementById('lm-inv-name').value='';
+  await loadLMInvoiceGroups();
+});
+async function loadLMInvoiceGroups(){
+  const { data } = await sbClient.from('invoices').select('*, invoice_lines(*)').is('taxable_amount', 0).order('created_at',{ascending:false}).limit(20);
+  const wrap = document.getElementById('lm-invgroup-list');
+  if(!data || !data.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
+  wrap.innerHTML = data.map(g=>`
+    <div class="invcard">
+      <div class="hd"><div class="name">${g.vendor_code}</div><span class="small">${(g.invoice_lines||[]).length} lines</span></div>
+      <div class="row-actions">
+        <label class="btn secondary btn-sm" style="cursor:pointer;">Attach detail file (CSV/XLSX)
+          <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-inv="${g.id}" class="attach-lm-detail">
+        </label>
+      </div>
+    </div>`).join('');
+  wrap.querySelectorAll('.attach-lm-detail').forEach(inp=>{
     inp.addEventListener('change', async (e)=>{
       const file = e.target.files[0]; if(!file) return;
-      const grpId = e.target.dataset.grp, costHeader = e.target.dataset.header;
-      const raw = await parseTabularFile(file);
-      const keys = raw.length ? Object.keys(raw[0]) : [];
-      const shipCol = findCol(keys, ALIASES.shipmentId), boxCol = findCol(keys, ALIASES.boxId),
-            refCol = findCol(keys, ALIASES.refKey), chargeCol = findCol(keys, ALIASES.chargeCode),
-            amtCol = findCol(keys, ['amount','amt','value','cost','charge amount']);
-      const rows = [];
-      raw.forEach(row=>{
+      const invId = e.target.dataset.inv;
+      const {rows, headers} = await parseTabularFile(file);
+      const shipCol = headers.find(h=>['shipment id','awb','shipment'].includes(normHeader(h)));
+      const boxCol = headers.find(h=>['box id','box','boxes'].includes(normHeader(h)));
+      const refCol = headers.find(h=>['ref number','reference number','tracking number'].includes(normHeader(h)));
+      const chargeCol = headers.find(h=>['charge code','nature of service','description'].includes(normHeader(h)));
+      const amtCol = headers.find(h=>['amount','billed_amount','amt'].includes(normHeader(h)));
+      const lines = [];
+      rows.forEach(row=>{
         let shipmentId='', boxId='';
-        if(shipCol && row[shipCol]){ shipmentId=String(row[shipCol]).trim(); if(boxCol && row[boxCol]) boxId=String(row[boxCol]).trim(); }
-        else if(refCol && row[refCol]){ const d=deriveFromRef(row[refCol]); shipmentId=d.shipmentId; boxId=d.boxId; }
+        if(shipCol && row[shipCol]){ shipmentId=String(row[shipCol]).trim(); boxId = boxCol && row[boxCol] ? String(row[boxCol]).trim() : ''; }
+        else if(refCol && row[refCol]){ const ref=String(row[refCol]).trim(); const m=ref.match(/^(.*?)(B\d{1,3})$/i); if(m){shipmentId=m[1];boxId=ref;}else shipmentId=ref; }
         if(!shipmentId) return;
-        const amount = amtCol ? num(row[amtCol]) : NaN;
+        const amount = amtCol ? Math.abs(num(row[amtCol])) : NaN;
         if(isNaN(amount)) return;
-        let chargeCodeRaw = chargeCol ? String(row[chargeCol]).trim() : '';
-        let chargeCode = null;
-        if(chargeCodeRaw){
-          const rlow = chargeCodeRaw.toLowerCase();
-          for(const kw in state.chargeCodeDict){ if(rlow===kw || rlow.includes(kw)){ chargeCode = state.chargeCodeDict[kw]; break; } }
-        }
-        rows.push({invoice_group_id:grpId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:chargeCodeRaw||null, charge_code:chargeCode, amount, cost_header:costHeader, file_name:file.name});
+        const raw = chargeCol ? String(row[chargeCol]).trim() : '';
+        lines.push({invoice_id:invId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:raw, charge_code:null, amount});
       });
-      for(const chunk of chunkArray(rows, 500)){
-        const { error } = await sbClient.from('invoice_lines').insert(chunk);
-        if(error){ alert('Save failed: '+error.message); return; }
+      for(const chunk of chunkArray(lines,500)){ await sbClient.from('invoice_lines').insert(chunk.map(l=>({invoice_id:l.invoice_id, charge_code_raw:l.charge_code_raw, charge_code:l.charge_code, amount:l.amount}))); }
+      // also record against box_lm_costs.actual_amount for matching
+      for(const l of lines){
+        if(l.box_id){
+          await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null);
+        }
       }
-      await loadInvoiceGroupsAndCounts();
-      await refreshMappingFromDB();
+      await sbClient.from('invoices').update({taxable_amount: lines.reduce((s,l)=>s+l.amount,0), status:'PENDING_APPROVAL', current_level:'LOB_OWNER'}).eq('id', invId);
+      await loadLMInvoiceGroups(); await loadChargeCodes();
     });
   });
 }
-
-/* ============================= CHARGE CODE DICTIONARY ============================= */
-async function loadDictionary(){
-  const { data, error } = await sbClient.from('charge_code_dictionary').select('*');
-  if(error) return;
-  state.chargeCodeDict = {}; (data||[]).forEach(r=> state.chargeCodeDict[r.keyword]=r.charge_code);
-  renderDict();
-}
-document.getElementById('btn-add-kw').addEventListener('click', async ()=>{
-  const kw = document.getElementById('new-kw').value.trim().toLowerCase();
-  const code = document.getElementById('new-code').value.trim();
-  if(!kw||!code) return;
-  const { error } = await sbClient.from('charge_code_dictionary').upsert({keyword:kw, charge_code:code});
-  if(error){ alert(error.message); return; }
-  document.getElementById('new-kw').value=''; document.getElementById('new-code').value='';
-  await loadDictionary();
+document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>{
+  const { data: boxes } = await sbClient.from('box_lm_costs').select('*');
+  const results = (boxes||[]).map(b=>{
+    let reason, delta;
+    if(b.actual_amount==null){ reason='Pending actualisation'; }
+    else { delta = b.actual_amount - b.amount; reason = Math.abs(delta)<=2 ? 'Matched' : (delta>0?'Rate variance — higher':'Rate variance — lower'); }
+    return {...b, delta, reason};
+  });
+  const tb = document.querySelector('#lm-recon-table tbody'); tb.innerHTML='';
+  results.forEach(r=> tb.innerHTML += `<tr><td class="mono">${r.shipment_id}</td><td class="mono">${r.box_id}</td><td class="mono">${r.charge_code}</td><td class="num">${fmt(r.amount)}</td><td class="num">${fmt(r.actual_amount)}</td><td class="num">${r.delta!=null?fmt(r.delta):'—'}</td><td>${r.reason}</td></tr>`);
+  const totalProv = results.reduce((s,r)=>s+(r.amount||0),0), totalAct = results.reduce((s,r)=>s+(r.actual_amount||0),0);
+  document.getElementById('lm-recon-strip').innerHTML = `<div class="ledgerstrip"><div class="cell"><div class="lab">Provisional</div><div class="val">${fmt(totalProv)}</div></div><div class="cell"><div class="lab">Actual</div><div class="val">${fmt(totalAct)}</div></div><div class="cell"><div class="lab">Delta</div><div class="val">${fmt(totalAct-totalProv)}</div></div></div>`;
+  document.getElementById('lm-recon-note').textContent = `${results.length} box/charge rows.`;
 });
-function renderDict(){
-  const tb = document.querySelector('#dict-table tbody'); tb.innerHTML='';
-  Object.entries(state.chargeCodeDict).forEach(([kw,code])=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${kw}</td><td class="mono">${code}</td><td><button class="btn secondary btn-sm del-kw">Remove</button></td>`;
-    tr.querySelector('.del-kw').addEventListener('click', async ()=>{ await sbClient.from('charge_code_dictionary').delete().eq('keyword', kw); await loadDictionary(); });
-    tb.appendChild(tr);
-  });
-}
-async function refreshMappingFromDB(){
-  const { data, error } = await sbClient.from('invoice_lines').select('charge_code_raw, charge_code').is('charge_code', null).not('charge_code_raw','is',null);
-  if(error) return;
-  const unmapped = {};
-  (data||[]).forEach(r=>{ if(r.charge_code_raw) unmapped[r.charge_code_raw] = (unmapped[r.charge_code_raw]||0)+1; });
-  const terms = Object.keys(unmapped);
-  document.getElementById('unmapped-count').textContent = `${terms.length} unmapped term${terms.length===1?'':'s'}`;
-  const tb = document.querySelector('#mapping-table tbody'); tb.innerHTML='';
-  if(!terms.length){ tb.innerHTML='<tr><td colspan="4" class="small">Nothing unmapped right now.</td></tr>'; return; }
-  terms.forEach(term=>{
-    const codes = [...new Set(Object.values(state.chargeCodeDict))];
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${term}</td><td class="num">${unmapped[term]}</td>
-      <td><select class="map-select"><option value="">— choose —</option>${codes.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></td>
-      <td><button class="btn secondary btn-sm map-apply">Apply</button></td>`;
-    tr.querySelector('.map-apply').addEventListener('click', async ()=>{
-      const code = tr.querySelector('.map-select').value; if(!code) return;
-      await sbClient.from('charge_code_dictionary').upsert({keyword:term.toLowerCase(), charge_code:code});
-      await sbClient.from('invoice_lines').update({charge_code:code}).eq('charge_code_raw', term);
-      await loadDictionary(); await refreshMappingFromDB();
-    });
-    tb.appendChild(tr);
-  });
-}
 
-/* ============================= FETCH ALL FOR RECONCILIATION ============================= */
-async function fetchAllForReconciliation(){
-  const [{data:ships,error:e1}, {data:costs,error:e2}, {data:boxlm,error:e3}, {data:invLines,error:e4}] = await Promise.all([
-    sbClient.from('shipments').select('*'),
-    sbClient.from('shipment_costs').select('*'),
-    sbClient.from('box_lm_costs').select('*'),
-    sbClient.from('invoice_lines').select('*')
-  ]);
-  if(e1||e2||e3||e4){ throw new Error((e1||e2||e3||e4).message); }
-  state.provisionalShipments = new Map();
-  (ships||[]).forEach(s=> state.provisionalShipments.set(s.shipment_id, {shipmentId:s.shipment_id, lob:s.lob||'', node:s.node, pickupDate:s.pickup_date, grossWeight:s.gross_weight, revenue:s.revenue, costs:{}}));
-  (costs||[]).forEach(c=>{ const s = state.provisionalShipments.get(c.shipment_id); if(s) s.costs[c.header]=c.amount; });
-  state.provisionalBoxLM = (boxlm||[]).map(b=>({shipmentId:b.shipment_id, boxId:b.box_id, chargeCode:b.charge_code, amount:b.amount}));
-  state.invoices = (invLines||[]).map(l=>({shipmentId:l.shipment_id, boxId:l.box_id||'', chargeCodeRaw:l.charge_code_raw||'', chargeCode:l.charge_code, amount:l.amount, invoiceGroupId:l.invoice_group_id, costHeader:l.cost_header, flag:null}));
-}
-
-/* ============================= RECONCILIATION ENGINE ============================= */
-function headerOf(code){ return code.endsWith('_TOTAL') ? code.replace('_TOTAL','') : 'LM'; }
-async function runReconciliation(){
-  document.getElementById('recon-run-note').textContent = 'Loading latest data from the database…';
-  try{ await fetchAllForReconciliation(); }
-  catch(err){ document.getElementById('recon-run-note').textContent = 'Could not load data: '+err.message; return; }
-
-  state.settings.toleranceAmount = num(document.getElementById('tol-amount').value) || 0;
-  state.settings.tolerancePct = num(document.getElementById('tol-pct').value) || 0;
-  const tol = state.settings.toleranceAmount, tolPct = state.settings.tolerancePct;
-
-  const combos = new Map();
-  function ensure(shipmentId, boxId, code){ const key=`${shipmentId}|${boxId||''}|${code}`; if(!combos.has(key)) combos.set(key,{shipmentId,boxId,code,provisional:undefined,actual:undefined}); return combos.get(key); }
-
-  const shipmentsWithBoxLM = new Set();
-  state.provisionalBoxLM.forEach(r=>{ shipmentsWithBoxLM.add(r.shipmentId); const c=ensure(r.shipmentId,r.boxId,r.chargeCode); c.provisional=(c.provisional||0)+r.amount; });
-
-  state.provisionalShipments.forEach(ship=>{
-    HEADERS.forEach(h=>{
-      const amt = ship.costs[h]; if(amt===undefined) return;
-      if(h==='LM' && shipmentsWithBoxLM.has(ship.shipmentId)) return;
-      const c = ensure(ship.shipmentId, '', h+'_TOTAL'); c.provisional = amt;
-    });
-  });
-
-  const groups = new Map();
-  state.invoices.forEach(r=>{ const code=r.chargeCode||(r.costHeader+'_TOTAL'); const key=`${r.shipmentId}|${r.boxId||''}|${code}`; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r); });
-  groups.forEach(rows=>{
-    if(rows.length>1){ const amts=rows.map(r=>r.amount); const allEqual=amts.every(a=>Math.abs(a-amts[0])<0.01); rows.forEach((r,i)=>{ r.flag = allEqual ? (i>0?'duplicate':null) : 'multiple_review'; }); }
-    else rows[0].flag=null;
-  });
-
-  state.invoices.forEach(r=>{
-    if(r.flag==='duplicate') return;
-    const code = r.chargeCode || (r.costHeader+'_TOTAL');
-    if(code.endsWith('_TOTAL') && r.boxId && headerOf(code)==='LM'){
-      const detailSum = state.provisionalBoxLM.filter(p=>p.shipmentId===r.shipmentId && p.boxId===r.boxId).reduce((s,p)=>s+p.amount,0);
-      const c = ensure(r.shipmentId, r.boxId, code);
-      if(c.provisional===undefined && detailSum>0) c.provisional = detailSum;
-      c.actual = (c.actual||0) + r.amount;
-    } else { const c = ensure(r.shipmentId, r.boxId, code); c.actual = (c.actual||0) + r.amount; }
-  });
-
-  const results = [];
-  combos.forEach(c=>{
-    let reason, status, delta;
-    if(c.provisional===undefined && c.actual===undefined){ reason='No data'; status='info'; }
-    else if(c.provisional===undefined){ reason='Planning gap — not provisioned'; status='exception'; }
-    else if(c.actual===undefined){ reason='Pending actualisation'; status='pending'; }
-    else{
-      delta = c.actual - c.provisional;
-      const pct = c.provisional!==0 ? (delta/c.provisional*100) : (c.actual!==0?100:0);
-      if(Math.abs(delta)<=tol || Math.abs(pct)<=tolPct){ reason='Matched'; status='matched'; }
-      else if(Math.abs(pct)>=20){ reason = delta>0?'Large variance — actual exceeds provision':'Large variance — actual below provision'; status='exception'; }
-      else{ reason = delta>0?'Rate variance — actual higher':'Rate variance — actual lower'; status='review'; }
-    }
-    results.push({shipmentId:c.shipmentId, boxId:c.boxId, chargeCode:c.code, header:headerOf(c.code),
-      granularity: c.code.endsWith('_TOTAL') ? (c.boxId?'Box total':'Shipment-level') : 'Box detail',
-      provisional:c.provisional, actual:c.actual, delta, reason, status});
-  });
-  state.invoices.filter(r=>r.flag==='duplicate').forEach(r=>{
-    results.push({shipmentId:r.shipmentId, boxId:r.boxId, chargeCode:r.chargeCode||(r.costHeader+'_TOTAL'), header:r.costHeader, granularity:'Invoice line', provisional:undefined, actual:r.amount, delta:undefined, reason:'Duplicate charge — same box + charge billed twice', status:'exception'});
-  });
-  state.invoices.filter(r=>r.flag==='multiple_review').forEach(r=>{
-    results.push({shipmentId:r.shipmentId, boxId:r.boxId, chargeCode:r.chargeCode||(r.costHeader+'_TOTAL'), header:r.costHeader, granularity:'Invoice line', provisional:undefined, actual:r.amount, delta:undefined, reason:'Multiple differing charges under same code — review', status:'review'});
-  });
-
-  state.reconciliation = results;
-  renderReconciliation();
-  document.getElementById('recon-run-note').textContent = `${results.length} rows evaluated, as of ${new Date().toLocaleString()}.`;
-  renderAccounting(); renderPnL();
-}
-
-/* ============================= RENDER: RECONCILE ============================= */
-function renderReconciliation(){
-  const rows = state.reconciliation;
-  const sum = f => rows.reduce((s,r)=> s + (typeof r[f]==='number'?r[f]:0), 0);
-  const totalProv = sum('provisional'), totalAct = sum('actual'), totalDelta = totalAct-totalProv;
-  const matched = rows.filter(r=>r.status==='matched').length, exc = rows.filter(r=>r.status==='exception').length;
-  document.getElementById('recon-strip').innerHTML = `
-    <div class="ledgerstrip">
-      <div class="cell"><div class="lab">Total provisional</div><div class="val">${fmt(totalProv)}</div></div>
-      <div class="cell"><div class="lab">Total actual</div><div class="val">${fmt(totalAct)}</div></div>
-      <div class="cell"><div class="lab">Net delta</div><div class="val ${totalDelta<0?'pos':(totalDelta>0?'neg':'')}">${fmt(totalDelta)}</div></div>
-      <div class="cell"><div class="lab">Matched</div><div class="val">${matched} / ${rows.length}</div></div>
-      <div class="cell"><div class="lab">Exceptions</div><div class="val ${exc?'neg':''}">${exc}</div></div>
+/* ============================= APPROVAL QUEUE ============================= */
+async function loadQueue(){
+  const role = CURRENT_PROFILE.role;
+  const wrap = document.getElementById('queue-list');
+  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('status','PENDING_APPROVAL').order('created_at');
+  let mine = (data||[]).filter(inv=> inv.current_level === role || (role==='FINANCE_MANAGER'));
+  if(!mine.length){ wrap.innerHTML = '<div class="emptystate">Nothing in your queue.</div>'; return; }
+  wrap.innerHTML = mine.map(inv=>{
+    const makerBlocked = inv.entered_by === CURRENT_USER.id;
+    return `<div class="invcard" data-inv="${inv.id}">
+      <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code}</div><span class="status-pill st-pending_approval">${inv.current_level}${inv.is_multi_lob?' · MULTI-LOB':''}</span></div>
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency}</div>
+      <div class="meta">${(inv.invoice_tags||[]).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
+      ${makerBlocked ? '<div class="note warn">You entered/tagged this invoice — maker&ne;checker rule blocks you from approving it. Escalating to Finance Head.</div>' : ''}
+      <div class="row-actions">
+        <button class="btn teal btn-sm act-approve" ${makerBlocked?'disabled':''}>Approve</button>
+        <button class="btn red btn-sm act-reject">Reject</button>
+        <button class="btn secondary btn-sm act-sendback">Send back</button>
+        <button class="btn secondary btn-sm act-reassign">Reassign</button>
+        <button class="btn amber btn-sm act-escalate">Escalate now</button>
+        ${inv.is_multi_lob ? '<button class="btn secondary btn-sm act-splitlob">Assign to one LOB Owner</button>' : ''}
+      </div>
     </div>`;
-  drawReconTable(rows);
+  }).join('');
+  wrap.querySelectorAll('.act-approve').forEach(b=>b.addEventListener('click', e=> approveInvoice(e.target.closest('.invcard').dataset.inv)));
+  wrap.querySelectorAll('.act-reject').forEach(b=>b.addEventListener('click', e=> rejectInvoice(e.target.closest('.invcard').dataset.inv)));
+  wrap.querySelectorAll('.act-sendback').forEach(b=>b.addEventListener('click', e=> sendBackInvoice(e.target.closest('.invcard').dataset.inv)));
+  wrap.querySelectorAll('.act-reassign').forEach(b=>b.addEventListener('click', e=> reassignInvoice(e.target.closest('.invcard').dataset.inv)));
+  wrap.querySelectorAll('.act-escalate').forEach(b=>b.addEventListener('click', e=> escalateInvoice(e.target.closest('.invcard').dataset.inv)));
+  wrap.querySelectorAll('.act-splitlob').forEach(b=>b.addEventListener('click', e=> assignSingleLobOwner(e.target.closest('.invcard').dataset.inv)));
 }
-function drawReconTable(rows){
-  const tb = document.querySelector('#recon-table tbody'); tb.innerHTML='';
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="10" class="small">Run reconciliation to see results.</td></tr>'; return; }
-  rows.forEach(r=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="mono">${r.shipmentId}</td><td class="mono">${r.boxId||''}</td><td>${HEADER_LABEL[r.header]||r.header}</td>
-      <td class="mono">${r.chargeCode}</td><td class="small">${r.granularity}</td>
-      <td class="num">${fmt(r.provisional)}</td><td class="num">${fmt(r.actual)}</td><td class="num">${typeof r.delta==='number'?fmt(r.delta):'—'}</td>
-      <td>${r.reason}</td><td><span class="status-pill status-${r.status}">${r.status}</span></td>`;
-    tb.appendChild(tr);
-  });
+async function logAction(invoiceId, action, level, actor, reason, escalation=false, reassignedTo=null){
+  await sbClient.from('approval_actions').insert({invoice_id:invoiceId, action, level, actor, reason, is_escalation_driven:escalation, reassigned_to:reassignedTo});
 }
-document.getElementById('btn-run-recon').addEventListener('click', runReconciliation);
-document.getElementById('recon-search').addEventListener('input', filterRecon);
-document.getElementById('recon-filter').addEventListener('change', filterRecon);
-function filterRecon(){
-  const q = document.getElementById('recon-search').value.toLowerCase();
-  const status = document.getElementById('recon-filter').value;
-  drawReconTable(state.reconciliation.filter(r=>{
-    const mq = !q || (r.shipmentId||'').toLowerCase().includes(q) || (r.boxId||'').toLowerCase().includes(q) || (r.chargeCode||'').toLowerCase().includes(q);
-    const ms = !status || r.status===status; return mq && ms;
+async function approveInvoice(invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  if(inv.entered_by === CURRENT_USER.id){ alert('Maker≠checker: you entered this invoice, escalating to Finance Head instead.'); await sbClient.from('invoices').update({current_level:'FINANCE_HEAD'}).eq('id', invoiceId); await loadQueue(); return; }
+  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
+  const isLast = inv.current_level==='CEO' || idx===APPROVAL_CHAIN.length-1 || inv.current_level==='FINANCE_HEAD' && false;
+  // Determine if this level is the final required level: recompute using thresholds would be more precise;
+  // simplified here — CEO is always final; FINANCE_HEAD/LOB_OWNER finalize if no higher escalation was set at routing time.
+  if(inv.current_level==='CEO'){
+    await finalizeApproval(invoiceId);
+  } else {
+    // check if invoice was routed to escalate further; if current_level is the level it was routed to, it's final
+    await finalizeApproval(invoiceId);
+  }
+  await logAction(invoiceId, 'APPROVED', inv.current_level, CURRENT_USER.id, null);
+  await loadQueue();
+}
+async function finalizeApproval(invoiceId){
+  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  for(const tag of tags){
+    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+    const variance = actual - summary.sum;
+    // re-apportion per-kg using OUR recorded weights, and reverse+book actual on each shipment_costs row
+    const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
+    for(const sid of summary.shipmentIds){
+      const { data: sc } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid).eq('cost_header', tag.cost_header).maybeSingle();
+      const prov = sc ? sc.provisional_amount : 0;
+      const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
+      const shipmentActual = prov + share*variance;
+      await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
+    }
+    await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tag.id);
+  }
+  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
+}
+async function rejectInvoice(invoiceId){
+  const reason = prompt('Reason for rejection?'); if(!reason) return;
+  await sbClient.from('invoices').update({status:'REJECTED'}).eq('id', invoiceId);
+  await logAction(invoiceId, 'REJECTED', CURRENT_PROFILE.role, CURRENT_USER.id, reason);
+  await loadQueue();
+}
+async function sendBackInvoice(invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
+  if(idx<=0){ alert('Already at the first level — cannot send back further.'); return; }
+  const reason = prompt('Reason for sending back?'); if(!reason) return;
+  await sbClient.from('invoices').update({current_level: APPROVAL_CHAIN[idx-1]}).eq('id', invoiceId);
+  await logAction(invoiceId, 'SENT_BACK', inv.current_level, CURRENT_USER.id, reason);
+  await loadQueue();
+}
+async function reassignInvoice(invoiceId){
+  const toUser = prompt('User ID to reassign to?'); if(!toUser) return;
+  await logAction(invoiceId, 'REASSIGNED', CURRENT_PROFILE.role, CURRENT_USER.id, 'Manual reassignment', false, toUser);
+  await loadQueue();
+}
+async function escalateInvoice(invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
+  const next = APPROVAL_CHAIN[Math.min(idx+1, APPROVAL_CHAIN.length-1)];
+  await sbClient.from('invoices').update({current_level: next}).eq('id', invoiceId);
+  await logAction(invoiceId, 'ESCALATED', next, CURRENT_USER.id, 'Aged past SLA', true);
+  await loadQueue();
+}
+async function assignSingleLobOwner(invoiceId){
+  const lobOwnerUserId = prompt('User ID of the LOB Owner to assign this whole invoice to?'); if(!lobOwnerUserId) return;
+  await sbClient.from('invoices').update({current_level:'LOB_OWNER'}).eq('id', invoiceId);
+  await logAction(invoiceId, 'REASSIGNED', 'LOB_OWNER', CURRENT_USER.id, 'Finance Head wildcard: assigned multi-LOB invoice to single LOB Owner', false, lobOwnerUserId);
+  await loadQueue();
+}
+
+/* Finance Manager suo moto override — only for in-queue invoices */
+async function financeManagerOverride(invoiceId){
+  if(CURRENT_PROFILE.role !== 'FINANCE_MANAGER'){ alert('Only Finance Manager can do this.'); return; }
+  const { data: inv } = await sbClient.from('invoices').select('status').eq('id', invoiceId).single();
+  if(inv.status !== 'PENDING_APPROVAL'){ alert('Override only applies to invoices still in queue — this one has already been finalized.'); return; }
+  const newLevel = prompt('New approval level (LOB_OWNER / FINANCE_HEAD / CEO)?'); if(!newLevel) return;
+  const reason = prompt('Mandatory reason for override:'); if(!reason) return;
+  await sbClient.from('invoices').update({current_level:newLevel}).eq('id', invoiceId);
+  await logAction(invoiceId, 'OVERRIDE', newLevel, CURRENT_USER.id, reason);
+  await loadQueue();
+}
+
+/* ============================= DISPUTES ============================= */
+async function loadDisputes(){
+  const { data } = await sbClient.from('invoices').select('*, disputes(*)').in('status',['PENDING_APPROVAL','APPROVED']).order('created_at',{ascending:false}).limit(30);
+  const wrap = document.getElementById('dispute-list');
+  wrap.innerHTML = (data||[]).map(inv=>{
+    const d = (inv.disputes||[])[0];
+    return `<div class="invcard" data-inv="${inv.id}">
+      <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code}</div>${d?`<span class="status-pill st-${d.status.toLowerCase()}">${d.status}</span>`:''}</div>
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency}</div>
+      ${d ? `<div class="meta">${d.dispute_text||''}</div>` : `
+        <div class="row-actions">
+          <input type="text" class="dispute-text" placeholder="Dispute description (vendor-facing)" style="max-width:400px;">
+          <button class="btn amber btn-sm act-raise-dispute">Raise dispute</button>
+        </div>`}
+      ${d && d.status==='RAISED' ? `
+        <div class="row-actions">
+          <button class="btn teal btn-sm act-agree">Agreed — needs Credit Note</button>
+          <button class="btn red btn-sm act-deny">Denied — explain why our data was wrong</button>
+          <button class="btn secondary btn-sm act-settle">Settled — enter final basis</button>
+        </div>` : ''}
+    </div>`;
+  }).join('') || '<div class="emptystate">No invoices to review.</div>';
+
+  wrap.querySelectorAll('.act-raise-dispute').forEach(b=>b.addEventListener('click', async e=>{
+    const card = e.target.closest('.invcard'); const invId = card.dataset.inv;
+    const text = card.querySelector('.dispute-text').value.trim();
+    await sbClient.from('disputes').insert({invoice_id:invId, status:'RAISED', dispute_text:text, raised_by:CURRENT_USER.id});
+    await sbClient.from('invoices').update({status:'DISPUTED'}).eq('id', invId);
+    await loadDisputes();
+  }));
+  wrap.querySelectorAll('.act-agree').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.closest('.invcard').dataset.inv;
+    const amount = num(prompt('Credit Note amount?')); const reason = prompt('CN reason?');
+    if(isNaN(amount)) return;
+    const { data: d } = await sbClient.from('disputes').select('id').eq('invoice_id', invId).single();
+    await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:d.id, amount, reason});
+    await sbClient.from('disputes').update({status:'AGREED', resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    await loadDisputes();
+  }));
+  wrap.querySelectorAll('.act-deny').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.closest('.invcard').dataset.inv;
+    const reason = prompt('Mandatory: why was our data wrong?'); if(!reason) return;
+    await sbClient.from('disputes').update({status:'DENIED', resolution_reason:reason, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    await loadDisputes();
+  }));
+  wrap.querySelectorAll('.act-settle').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.closest('.invcard').dataset.inv;
+    const basis = prompt('Final settled basis (e.g. "715kg at Rs500")'); if(!basis) return;
+    const amount = num(prompt('Credit Note amount for the difference (0 if none)?')) || 0;
+    if(amount>0){ const { data: d } = await sbClient.from('disputes').select('id').eq('invoice_id', invId).single(); await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:d.id, amount, reason:'Settlement CN'}); }
+    await sbClient.from('disputes').update({status:'SETTLED', settled_basis:basis, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    await loadDisputes();
   }));
 }
-document.getElementById('btn-export-recon').addEventListener('click', ()=> exportCSV(state.reconciliation, ['shipmentId','boxId','header','chargeCode','granularity','provisional','actual','delta','reason','status'], 'reconciliation.csv'));
 
-/* ============================= PnL RESOLUTION ============================= */
-function resolvedRowsForPnL(){
-  const groups = new Map();
-  state.reconciliation.forEach(r=>{
-    if(r.reason.startsWith('Duplicate') || r.reason.startsWith('Multiple')) return;
-    const gkey = `${r.shipmentId}|${r.boxId||''}|${r.header}`;
-    if(!groups.has(gkey)) groups.set(gkey, []);
-    groups.get(gkey).push(r);
+/* ============================= AGING & WRITE-BACK ============================= */
+document.getElementById('btn-run-aging').addEventListener('click', async ()=>{
+  const asof = document.getElementById('aging-asof').value || todayISO();
+  const { data: openCosts } = await sbClient.from('shipment_costs').select('*, shipments(pickup_date, mawb, node)').eq('status','OPEN');
+  const tb = document.querySelector('#aging-table tbody'); tb.innerHTML='';
+  (openCosts||[]).forEach(r=>{
+    const pd = r.shipments ? r.shipments.pickup_date : null;
+    const days = pd ? daysBetween(pd, asof) : null;
+    tb.innerHTML += `<tr data-sid="${r.shipment_id}" data-header="${r.cost_header}"><td><input type="checkbox" class="aging-check"></td><td class="mono">${r.shipment_id}</td><td>${HEADER_LABEL[r.cost_header]||r.cost_header}</td><td class="num">${fmt(r.provisional_amount)}</td><td class="num">${days!=null?days:'—'}</td></tr>`;
   });
-  const resolved = [];
-  groups.forEach((rows, gkey)=>{
-    const [shipmentId, boxId, header] = gkey.split('|');
-    const totalRow = rows.find(r=> r.chargeCode.endsWith('_TOTAL'));
-    if(boxId && totalRow && rows.length>1){ resolved.push({shipmentId, boxId, header, provisional:totalRow.provisional, actual:totalRow.actual}); }
-    else{
-      const provDefined = rows.some(r=>typeof r.provisional==='number'), actDefined = rows.some(r=>typeof r.actual==='number');
-      const prov = rows.reduce((s,r)=> s+(typeof r.provisional==='number'?r.provisional:0),0);
-      const act = rows.reduce((s,r)=> s+(typeof r.actual==='number'?r.actual:0),0);
-      resolved.push({shipmentId, boxId, header, provisional:provDefined?prov:undefined, actual:actDefined?act:undefined});
-    }
-  });
-  return resolved;
-}
+});
+document.getElementById('aging-select-all').addEventListener('change', e=>{ document.querySelectorAll('.aging-check').forEach(c=>c.checked = e.target.checked); });
+document.getElementById('btn-writeback').addEventListener('click', async ()=>{
+  const reason = document.getElementById('writeback-reason').value.trim();
+  if(!reason){ alert('A reason is mandatory for write-back.'); return; }
+  const rows = [...document.querySelectorAll('#aging-table tbody tr')].filter(tr=>tr.querySelector('.aging-check').checked);
+  for(const tr of rows){
+    const sid = tr.dataset.sid, header = tr.dataset.header;
+    const amount = num(tr.children[3].textContent);
+    await sbClient.from('cost_written_back_ledger').insert({group_type:'SHIPMENT', group_key:sid, cost_header:header, amount, reason, actioned_by:CURRENT_USER.id});
+    await sbClient.from('shipment_costs').update({status:'WRITTEN_BACK'}).eq('shipment_id', sid).eq('cost_header', header);
+  }
+  document.getElementById('writeback-reason').value='';
+  document.getElementById('btn-run-aging').click();
+});
 
-/* ============================= ACCOUNTING ============================= */
-function renderAccounting(){
-  const resolved = resolvedRowsForPnL();
-  let carry=0, reverse=0, booked=0; const byHeader={}, byLOB={}, detail=[];
-  resolved.forEach(r=>{
-    const ship = state.provisionalShipments.get(r.shipmentId);
-    const lob = (ship && ship.lob) ? ship.lob : 'Unassigned';
-    if(!byHeader[r.header]) byHeader[r.header]={carry:0,reverse:0,booked:0};
-    if(!byLOB[lob]) byLOB[lob]={carry:0,reverse:0,booked:0};
-    let movement;
-    if(r.actual!==undefined){
-      const p = r.provisional||0; reverse+=p; booked+=r.actual;
-      byHeader[r.header].reverse+=p; byHeader[r.header].booked+=r.actual;
-      byLOB[lob].reverse+=p; byLOB[lob].booked+=r.actual;
-      movement = 'Reverse provision, book invoice';
-    } else if(r.provisional!==undefined){
-      carry+=r.provisional; byHeader[r.header].carry+=r.provisional; byLOB[lob].carry+=r.provisional;
-      movement = 'Carry provision';
-    } else return;
-    detail.push({shipmentId:r.shipmentId, lob, header:r.header, provisional:r.provisional, actual:r.actual, movement});
-  });
-  document.getElementById('acct-strip').innerHTML = `
-    <div class="ledgerstrip">
-      <div class="cell"><div class="lab">Provision to carry (books)</div><div class="val">${fmt(carry)}</div></div>
-      <div class="cell"><div class="lab">Provision to reverse</div><div class="val">${fmt(reverse)}</div></div>
-      <div class="cell"><div class="lab">Invoice booked</div><div class="val">${fmt(booked)}</div></div>
-      <div class="cell"><div class="lab">Net P&amp;L movement</div><div class="val ${(booked-reverse)>0?'neg':((booked-reverse)<0?'pos':'')}">${fmt(booked-reverse)}</div></div>
-    </div>`;
-  const ht = document.querySelector('#acct-header-table tbody'); ht.innerHTML='';
-  Object.entries(byHeader).forEach(([h,v])=>{ ht.innerHTML += `<tr><td>${HEADER_LABEL[h]||h}</td><td class="num">${fmt(v.carry)}</td><td class="num">${fmt(v.reverse)}</td><td class="num">${fmt(v.booked)}</td></tr>`; });
-  const lt = document.querySelector('#acct-lob-table tbody'); lt.innerHTML='';
-  Object.entries(byLOB).forEach(([l,v])=>{ lt.innerHTML += `<tr><td>${l}</td><td class="num">${fmt(v.carry)}</td><td class="num">${fmt(v.reverse)}</td><td class="num">${fmt(v.booked)}</td></tr>`; });
-  const dt = document.querySelector('#acct-detail-table tbody'); dt.innerHTML='';
-  detail.forEach(r=>{ dt.innerHTML += `<tr><td class="mono">${r.shipmentId}</td><td>${r.lob}</td><td>${HEADER_LABEL[r.header]||r.header}</td><td class="num">${fmt(r.provisional)}</td><td class="num">${fmt(r.actual)}</td><td class="small">${r.movement}</td></tr>`; });
-  state._acctDetail = detail;
-}
-document.getElementById('btn-export-acct').addEventListener('click', ()=> exportCSV(state._acctDetail||[], ['shipmentId','lob','header','provisional','actual','movement'], 'accounting_movements.csv'));
-
-/* ============================= SHIPMENT P&L ============================= */
-function renderPnL(){
-  const resolved = resolvedRowsForPnL();
-  const costByShipment = new Map();
-  resolved.forEach(r=>{ const cur=costByShipment.get(r.shipmentId)||0; costByShipment.set(r.shipmentId, cur+(r.actual!==undefined?r.actual:(r.provisional||0))); });
-  const maturityByShipment = new Map();
-  resolved.forEach(r=>{ const m=maturityByShipment.get(r.shipmentId)||{actual:false,provisional:false}; if(r.actual!==undefined) m.actual=true; if(r.provisional!==undefined && r.actual===undefined) m.provisional=true; maturityByShipment.set(r.shipmentId,m); });
-  const rows = [];
-  state.provisionalShipments.forEach((ship, shipmentId)=>{
-    const cost = costByShipment.get(shipmentId) || 0;
-    const revenue = isNaN(ship.revenue) || ship.revenue===null ? 0 : ship.revenue;
-    const contribution = revenue - cost, pct = revenue ? (contribution/revenue*100) : null;
-    const m = maturityByShipment.get(shipmentId) || {};
-    const maturity = m.actual && m.provisional ? 'Mixed' : (m.actual ? 'Actual' : (m.provisional ? 'Provisional' : 'No cost data'));
-    rows.push({shipmentId, lob: ship.lob||'Unassigned', revenue, cost, contribution, pct, maturity});
+/* ============================= P&L / ACCOUNTING ============================= */
+document.getElementById('btn-run-pnl').addEventListener('click', async ()=>{
+  const { data: ships } = await sbClient.from('shipments').select('*');
+  const { data: costs } = await sbClient.from('shipment_costs').select('*');
+  const costByShip = {};
+  (costs||[]).forEach(c=>{ costByShip[c.shipment_id] = (costByShip[c.shipment_id]||0) + (c.actual_amount!=null ? c.actual_amount : c.provisional_amount); });
+  const rows = (ships||[]).map(s=>{
+    const cost = costByShip[s.shipment_id] || 0;
+    const revenue = s.revenue_amount || 0;
+    return {shipment_id:s.shipment_id, lob:s.lob||'Unassigned', revenue, cost, contribution:revenue-cost, maturity: 'Mixed'};
   });
   const byLOB = {};
   rows.forEach(r=>{ if(!byLOB[r.lob]) byLOB[r.lob]={revenue:0,cost:0}; byLOB[r.lob].revenue+=r.revenue; byLOB[r.lob].cost+=r.cost; });
   const totalRev = rows.reduce((s,r)=>s+r.revenue,0), totalCost = rows.reduce((s,r)=>s+r.cost,0);
-  document.getElementById('pnl-strip').innerHTML = `
-    <div class="ledgerstrip">
-      <div class="cell"><div class="lab">Total revenue</div><div class="val">${fmt(totalRev)}</div></div>
-      <div class="cell"><div class="lab">Total cost</div><div class="val">${fmt(totalCost)}</div></div>
-      <div class="cell"><div class="lab">Contribution</div><div class="val ${(totalRev-totalCost)<0?'neg':'pos'}">${fmt(totalRev-totalCost)}</div></div>
-      <div class="cell"><div class="lab">Margin %</div><div class="val">${totalRev? ((totalRev-totalCost)/totalRev*100).toFixed(1):'0.0'}%</div></div>
-    </div>`;
+  document.getElementById('pnl-strip').innerHTML = `<div class="ledgerstrip"><div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(totalRev)}</div></div><div class="cell"><div class="lab">Cost</div><div class="val">${fmt(totalCost)}</div></div><div class="cell"><div class="lab">Contribution</div><div class="val ${(totalRev-totalCost)<0?'neg':'pos'}">${fmt(totalRev-totalCost)}</div></div></div>`;
   const lt = document.querySelector('#pnl-lob-table tbody'); lt.innerHTML='';
   Object.entries(byLOB).forEach(([lob,v])=>{ const c=v.revenue-v.cost; lt.innerHTML += `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.cost)}</td><td class="num">${fmt(c)}</td><td class="num">${v.revenue?(c/v.revenue*100).toFixed(1):'0.0'}%</td></tr>`; });
-  state._pnlRows = rows;
-  drawPnLTable(rows);
-}
-function drawPnLTable(rows){
   const st = document.querySelector('#pnl-ship-table tbody'); st.innerHTML='';
-  if(!rows.length){ st.innerHTML='<tr><td colspan="7" class="small">Run reconciliation to populate P&L.</td></tr>'; return; }
-  rows.forEach(r=>{ st.innerHTML += `<tr><td class="mono">${r.shipmentId}</td><td>${r.lob}</td><td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.contribution)}</td><td class="num">${r.pct===null?'—':r.pct.toFixed(1)+'%'}</td><td class="small">${r.maturity}</td></tr>`; });
-}
-document.getElementById('pnl-search').addEventListener('input', ()=>{
-  const q = document.getElementById('pnl-search').value.toLowerCase();
-  drawPnLTable((state._pnlRows||[]).filter(r=> !q || r.shipmentId.toLowerCase().includes(q) || r.lob.toLowerCase().includes(q)));
+  rows.forEach(r=> st.innerHTML += `<tr><td class="mono">${r.shipment_id}</td><td>${r.lob}</td><td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.contribution)}</td><td class="small">${r.maturity}</td></tr>`);
 });
-document.getElementById('btn-export-pnl').addEventListener('click', ()=> exportCSV(state._pnlRows||[], ['shipmentId','lob','revenue','cost','contribution','pct','maturity'], 'shipment_pnl.csv'));
 
-function exportCSV(rows, cols, filename){
-  if(!rows.length) return;
-  const lines = [cols.join(',')];
-  rows.forEach(r=> lines.push(cols.map(c=> JSON.stringify(r[c]===undefined?'':r[c])).join(',')));
-  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+/* ============================= ADMIN ============================= */
+async function loadUsersAndThresholds(){
+  const { data: users } = await sbClient.from('user_profiles').select('*');
+  const ut = document.querySelector('#users-table tbody'); ut.innerHTML='';
+  (users||[]).forEach(u=> ut.innerHTML += `<tr><td class="mono">${u.user_id.slice(0,8)}…</td><td>${u.full_name||''}</td><td>${u.role}</td><td>${u.lob||''}</td><td></td></tr>`);
+  const { data: th } = await sbClient.from('approval_thresholds').select('*').order('lob');
+  const tt = document.querySelector('#threshold-table tbody'); tt.innerHTML='';
+  (th||[]).forEach(t=> tt.innerHTML += `<tr><td>${t.lob}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header}</td><td class="num">${t.finance_head_pct}</td><td class="num">${fmt(t.finance_head_value)}</td><td class="num">${t.ceo_pct}</td><td class="num">${fmt(t.ceo_value)}</td><td></td></tr>`);
 }
+document.getElementById('btn-add-user').addEventListener('click', async ()=>{
+  const user_id = document.getElementById('new-user-id').value.trim();
+  const full_name = document.getElementById('new-user-name').value.trim();
+  const role = document.getElementById('new-user-role').value;
+  const lob = document.getElementById('new-user-lob').value.trim() || null;
+  if(!user_id) return;
+  await sbClient.from('user_profiles').upsert({user_id, full_name, role, lob});
+  await loadUsersAndThresholds();
+});
 
 /* ============================= TAB SWITCHING ============================= */
 function switchTab(name){
   document.querySelectorAll('nav.steps button').forEach(b=> b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpanel').forEach(p=> p.classList.toggle('active', p.id==='tab-'+name));
+  if(name==='queue') loadQueue();
+  if(name==='disputes') loadDisputes();
 }
 document.querySelectorAll('nav.steps button').forEach(b=> b.addEventListener('click', ()=> switchTab(b.dataset.tab)));
+document.getElementById('tagedit-close').addEventListener('click', ()=> document.getElementById('tagedit-modal').classList.remove('open'));
 </script>
 </body>
 </html>
