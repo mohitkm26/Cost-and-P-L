@@ -308,6 +308,15 @@
   </div>
 </div>
 
+<div class="modalbg" id="headerrow-modal">
+  <div class="modal">
+    <h3 style="margin-top:0;">Which row is the real header?</h3>
+    <p class="small">Some exports have a title or blank rows before the actual column headers — pick the right one below. We've pre-selected our best guess; just confirm or pick a different row.</p>
+    <div class="tablewrap" style="max-height:320px;"><table class="data" id="headerrow-table"><tbody></tbody></table></div>
+    <div class="row-actions"><button class="btn teal" id="headerrow-confirm">Use this row as the header</button></div>
+  </div>
+</div>
+
 <div class="modalbg" id="colmap-modal">
   <div class="modal">
     <button class="closebtn" id="colmap-close">&times;</button>
@@ -345,24 +354,63 @@ function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) o
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.floor((new Date(b) - new Date(a)) / 86400000); }
 
-function parseTabularFile(file){
+// Returns raw rows (array-of-arrays) — no header assumption. Header row is
+// picked interactively (with a best-guess default), since real exports vary:
+// some have the header on row 1, some have title/metadata rows above it.
+function parseRawRows(file){
   return new Promise((resolve, reject)=>{
     const ext = file.name.split('.').pop().toLowerCase();
-    if(ext==='csv'){ Papa.parse(file,{header:true, skipEmptyLines:true, complete:res=>resolve({rows:res.data, headers:res.meta.fields}), error:reject}); }
-    else if(ext==='xlsx'||ext==='xls'){
+    if(ext==='csv'){
+      Papa.parse(file,{skipEmptyLines:false, complete:res=>resolve(res.data), error:reject});
+    } else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
       reader.onload = e=>{ try{
           const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
           const sheet=wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
-          const headers = rows[0].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
-          const objRows = rows.slice(1).map(r=>{ const o={}; headers.forEach((h,i)=>o[h]=r[i]); return o; });
-          resolve({rows:objRows, headers});
+          resolve(rows);
         }catch(err){reject(err);} };
       reader.onerror = reject; reader.readAsArrayBuffer(file);
     } else reject(new Error('Unsupported file type: '+ext));
   });
 }
+function guessHeaderRowIndex(rawRows){
+  for(let i=0; i<Math.min(rawRows.length, 15); i++){
+    const row = rawRows[i] || [];
+    const nonEmptyText = row.filter(c => c!=='' && c!=null && isNaN(Number(c))).length;
+    if(nonEmptyText >= 3) return i; // first row that looks like labels, not data or blank
+  }
+  return 0;
+}
+// Shows a row-picker (pre-selected to the best guess) so the person confirms
+// rather than the app silently assuming row 1 is always the header.
+function pickHeaderRowThenParse(file){
+  return new Promise(async (resolve, reject)=>{
+    let rawRows;
+    try{ rawRows = await parseRawRows(file); } catch(err){ reject(err); return; }
+    const guess = guessHeaderRowIndex(rawRows);
+    const modal = document.getElementById('headerrow-modal');
+    const tb = document.querySelector('#headerrow-table tbody'); tb.innerHTML='';
+    rawRows.slice(0, 10).forEach((row, idx)=>{
+      const preview = row.slice(0,8).map(c=>String(c)).join(' | ');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><input type="radio" name="hr-pick" value="${idx}" ${idx===guess?'checked':''}></td><td class="small">${idx===guess?'<b>Suggested</b> — ':''}${preview}</td>`;
+      tb.appendChild(tr);
+    });
+    modal.classList.add('open');
+    document.getElementById('headerrow-confirm').onclick = ()=>{
+      const picked = parseInt(document.querySelector('input[name="hr-pick"]:checked').value, 10);
+      const headers = rawRows[picked].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
+      const dataRows = rawRows.slice(picked+1).filter(r => r.some(c => c!=='' && c!=null));
+      const objRows = dataRows.map(r=>{ const o={}; headers.forEach((h,i)=>o[h]=r[i]); return o; });
+      modal.classList.remove('open');
+      resolve({rows:objRows, headers});
+    };
+  });
+}
+// Back-compat wrapper for call sites that don't need the header-row picker
+// (kept simple on purpose — CSV files without a title block, mainly).
+function parseTabularFile(file){ return pickHeaderRowThenParse(file); }
 
 async function uploadDoc(file, folder){
   if(!file) return null;
@@ -441,16 +489,30 @@ document.getElementById('file-ship').addEventListener('change', async (e)=>{
     openColumnMapModal();
   }catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
 });
+function guessFieldForColumn(header){
+  const h = normHeader(header);
+  if(FIELD_GUESS[h]) return FIELD_GUESS[h]; // exact match first
+  for(const key in FIELD_GUESS){ if(h.includes(key) || key.includes(h)) return FIELD_GUESS[key]; } // then substring, either direction
+  return 'IGNORE';
+}
 function openColumnMapModal(){
   const tb = document.querySelector('#colmap-table tbody'); tb.innerHTML='';
   const sampleRow = pendingShipParsed.rows[0] || {};
+  let unguessedCount = 0;
   pendingShipParsed.headers.forEach((h, idx)=>{
-    const guessKey = FIELD_GUESS[normHeader(h)] || 'IGNORE';
+    const guessKey = guessFieldForColumn(h);
+    if(guessKey==='IGNORE') unguessedCount++;
     const tr = document.createElement('tr');
+    tr.className = guessKey==='IGNORE' ? 'needs-attention' : '';
     tr.innerHTML = `<td><b>${h}</b><br><span class="small">${String(sampleRow[h]).slice(0,40)}</span></td>
-      <td><select data-col="${h}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select></td>`;
+      <td><select data-col="${h}" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select>
+      ${guessKey!=='IGNORE' ? '<span class="small" style="color:var(--teal);"> ✓ guessed — confirm or change</span>' : '<span class="small" style="color:var(--amber);"> needs your call</span>'}</td>`;
     tb.appendChild(tr);
   });
+  document.querySelector('#colmap-modal .desc, #colmap-modal p.small')?.remove();
+  const p = document.createElement('p'); p.className='small';
+  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed — teal borders are pre-filled, just confirm; amber ones genuinely need your judgment.`;
+  document.querySelector('#colmap-modal h3').after(p);
   document.getElementById('colmap-modal').classList.add('open');
 }
 document.getElementById('colmap-close').addEventListener('click', ()=> document.getElementById('colmap-modal').classList.remove('open'));
