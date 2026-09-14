@@ -31,13 +31,13 @@
 | U5 | Allocation Excel export missing key columns | **DONE** — now includes Provisional Amount, Delta, and Delta % alongside Weight/Share%/Allocated Amount. |
 | U6 | Multi-MAWB batch file's identifier column is MAWB-only | **DONE** — batch file now accepts either a MAWB or a Shipment column per row, determining that row's group type automatically. |
 
-## Design questions — still open, nothing built against these
+## Design questions
 
-| # | Question |
-|---|---|
-| D1 | Pickup (and possibly Hub, First Mile) need to support more than one grain — fixed vehicle pool (Node+Period) vs. adhoc/courier (shipment-level) — chosen per invoice, not hardcoded. **Not built.** |
-| D2 | Aggregation, Ocean, and Trans-shipment cost logic was never validated against a real invoice the way Pickup/MM/OC/DC were. Ocean specifically may need volume(CBM)-based allocation and a different grouping key than MAWB. **Not built — needs real invoices first.** |
-| D3 | Date-wise export grain — assumed as a pickup-date-filtered version of the Shipment Level report for the Reports section below. **Assumption made to unblock Reports; not confirmed with you.** |
+| # | Question | Status |
+|---|---|---|
+| D1 | Pickup (and other headers) needed to support more than one grain, chosen per invoice. | **RESOLVED & DONE.** Full spec given: Pickup/First Mile → Node+Period or Shipment; Ocean/Middle Mile/Origin Customs/Destination Clearance/Destination Handling → MAWB or Shipment; Hub/Trans-shipment/Aggregation stay single-grain; Last Mile stays box-level (address-level grouping explicitly deferred — kept simple per instruction). Group Type is now a real per-invoice choice for the headers that need it, defaulting to the header's primary grain. Batch upload validates each row's grain against what that header allows. |
+| D2 | Aggregation, Ocean, and Trans-shipment cost logic never validated against a real invoice. | **Still open** — grains are now correctly configurable (see D1), but the underlying business logic (e.g. whether Ocean should allocate by volume/CBM instead of weight, or key off a Bill of Lading instead of MAWB) is still unconfirmed. Needs a real invoice for each to ground it, same as Pickup/MM/OC/DC got. |
+| D3 | Date-wise export grain for the Reports section. | **Still open** — assumption made (pickup-date-filtered Shipment Level report) to avoid blocking Reports; not yet confirmed. |
 
 ## New section — not yet built
 
