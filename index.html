@@ -175,14 +175,21 @@
         <label class="field">Backup document (optional)</label><input type="file" id="oi-backup">
         <label class="field">Cost header</label>
         <select id="oi-header"></select>
-        <label class="field">Group type <span class="small">(set automatically by the header above)</span></label>
-        <select id="oi-grouptype" disabled>
-          <option value="MAWB">MAWB</option>
-          <option value="NODE_PERIOD">Node + Period</option>
-          <option value="SHIPMENT">Single Shipment</option>
-        </select>
-        <label class="field">Group key (MAWB #, or "Node|YYYY-MM", or Shipment ID)</label>
-        <input type="text" id="oi-groupkey" placeholder="e.g. 31720205">
+        <input type="hidden" id="oi-grouptype">
+        <label class="field">Group key</label>
+        <input type="hidden" id="oi-groupkey">
+        <div id="oi-groupkey-mawb" style="display:none;">
+          <input type="text" id="oi-mawb-search" list="mawb-datalist" placeholder="Type to search MAWB…">
+          <datalist id="mawb-datalist"></datalist>
+        </div>
+        <div id="oi-groupkey-shipment" style="display:none;">
+          <input type="text" id="oi-shipment-search" list="shipment-datalist" placeholder="Type to search Shipment ID…">
+          <datalist id="shipment-datalist"></datalist>
+        </div>
+        <div id="oi-groupkey-node" style="display:none;">
+          <select id="oi-node-select"><option value="">— choose node —</option></select>
+          <input type="month" id="oi-period-picker" style="margin-top:6px;">
+        </div>
         <label class="field">Entered split amount for this header (optional — blank = compare against summed group total)</label>
         <input type="number" id="oi-entered-amount">
       </div>
@@ -196,15 +203,14 @@
     <div id="oi-status" class="small" style="margin-top:6px;"></div>
   </div>
   <div class="panel" style="margin-top:12px;">
-    <h2>Multi-MAWB batch upload <span class="small">(one invoice covering several MAWBs and/or headers)</span></h2>
-    <p class="desc">One row per MAWB, columns: <span class="mono">MAWB, Header1, Amount1, Header2, Amount2, Header3, Amount3, ...</span> (as many pairs as that MAWB actually bills), plus any other reference columns after the last pair. Every action afterward happens per MAWB line, not per invoice — accept the lines that match cleanly, dispute just the one that doesn't.</p>
+    <h2>Multi-MAWB batch upload <span class="small">(one invoice covering several MAWBs/shipments and/or headers)</span></h2>
+    <p class="desc">One row per MAWB or Shipment, columns: <span class="mono">MAWB (or Shipment), Currency, Header1, Amount1, Header2, Amount2, ...</span> (as many pairs as that row actually bills), plus any other reference columns after the last pair. Currency defaults to INR if omitted; any other currency is converted using the rate on file in Access &amp; Thresholds → FX Rates, locked to this invoice at the moment you create it. Every action afterward happens per line, not per invoice.</p>
     <div class="grid2">
       <div>
         <label class="field">Vendor code / name</label><input type="text" id="mm-vendor" placeholder="e.g. IBC CUSTOMS">
         <label class="field">Invoice number</label><input type="text" id="mm-invnum">
         <label class="field">Invoice date</label><input type="date" id="mm-date">
-        <label class="field">Currency</label><input type="text" id="mm-currency" value="INR">
-        <label class="field">Taxable amount (GST excluded) — must equal the file's total exactly</label><input type="number" id="mm-amount">
+        <label class="field">Taxable amount, in INR — must equal the file's total after FX conversion, exactly</label><input type="number" id="mm-amount">
       </div>
       <div>
         <label class="field">Source document (mandatory)</label><input type="file" id="mm-source">
@@ -331,6 +337,16 @@
       <p class="desc">Stored for when the tiered chain is re-enabled — not currently used for routing.</p>
       <div class="tablewrap" style="max-height:400px;"><table class="data" id="threshold-table"><thead><tr><th>LOB</th><th>Header</th><th class="num">FH %</th><th class="num">FH ₹</th><th class="num">CEO %</th><th class="num">CEO ₹</th></tr></thead><tbody></tbody></table></div>
     </div>
+    <div class="panel">
+      <h2>FX Rates</h2>
+      <p class="desc">Manual for now — a foreign-currency line on a multi-MAWB invoice looks up its rate here at the moment the invoice is created, and that rate locks to it permanently. Will be replaced by a live rate lookup later.</p>
+      <div class="tablewrap" style="max-height:300px;"><table class="data" id="fx-table"><thead><tr><th>Currency</th><th class="num">Rate to INR</th><th>Last updated</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="row-actions">
+        <input type="text" id="new-fx-currency" placeholder="e.g. USD" style="max-width:100px;">
+        <input type="number" id="new-fx-rate" placeholder="e.g. 87.5" style="max-width:120px;">
+        <button class="btn secondary btn-sm" id="btn-add-fx">Add / update rate</button>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -368,6 +384,10 @@ const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Custo
 const HEADER_GRAIN = {PICKUP:'NODE_PERIOD',FM:'NODE_PERIOD',HUB:'NODE_PERIOD',OC:'MAWB',MM:'MAWB',DC:'MAWB',
   DESTCLEAR:'MAWB',IOR:'MAWB',OCEAN:'MAWB',TRANSSHIP:'MAWB',LM_PICKUP:'SHIPMENT',LM:'SHIPMENT',
   AGGREGATION:'SHIPMENT',INDIA_UK_MM:'MAWB'};
+const HEADER_ORDER = ['PICKUP','FM','HUB','OC','MM','INDIA_UK_MM','DC','DESTCLEAR','IOR','LM_PICKUP','LM','AGGREGATION','TRANSSHIP','OCEAN'];
+function sortByHeaderOrder(rows, headerKey){
+  return [...rows].sort((a,b)=> HEADER_ORDER.indexOf(a[headerKey]) - HEADER_ORDER.indexOf(b[headerKey]));
+}
 const LM_COL_TO_CODE = {
   'base cost':'LM_BASE','fuel surcharge':'LM_FUEL','residentital surcharge ups':'LM_RES','residential surcharge':'LM_RES',
   'das charges ups / fedex':'LM_DAS','addl wight handle charges':'LM_ADDLWT',
@@ -409,7 +429,12 @@ function parseRawRows(file){
     else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
       reader.onload = e=>{ try{
-          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array', cellDates:true});
+          // Deliberately NOT using cellDates:true — SheetJS's Date-object construction has been
+          // an unreliable source of a real bug (a browser-timezone-dependent day shift at month
+          // boundaries). Dates come through as raw Excel serial numbers instead, and toISODate()
+          // converts them itself using only UTC-anchored arithmetic, so no local timezone is ever
+          // consulted anywhere in this pipeline.
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
           const sheet=wb.Sheets[wb.SheetNames[0]];
           resolve(XLSX.utils.sheet_to_json(sheet, {defval:'', header:1}));
         }catch(err){reject(err);} };
@@ -417,12 +442,29 @@ function parseRawRows(file){
     } else reject(new Error('Unsupported file type: '+ext));
   });
 }
+// Guaranteed timezone-safe: every path here uses either pure integer arithmetic or
+// UTC-prefixed Date methods (Date.UTC / getUTC*) — never a local Date constructor or
+// getter, and never .toISOString() on a Date whose own construction wasn't verified UTC.
+function excelSerialToISODate(serial){
+  const utcMs = Math.round((serial - 25569) * 86400 * 1000); // days since Excel epoch -> ms since Unix epoch, both UTC-anchored
+  const d = new Date(utcMs); // new Date(<milliseconds>) is always UTC-anchored regardless of browser timezone
+  if(isNaN(d)) return null;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+}
 function toISODate(val){
   if(val===''||val==null) return null;
-  if(val instanceof Date && !isNaN(val)) return val.toISOString().slice(0,10);
-  if(typeof val === 'number'){ const d = new Date(Math.round((val - 25569) * 86400 * 1000)); if(!isNaN(d)) return d.toISOString().slice(0,10); }
-  const parsed = new Date(val); if(!isNaN(parsed)) return parsed.toISOString().slice(0,10);
-  return null;
+  if(typeof val === 'number') return excelSerialToISODate(val);
+  if(val instanceof Date && !isNaN(val)){
+    // Read UTC components explicitly — never toISOString() blindly on a Date whose
+    // construction timezone-safety isn't verified, and never local getters.
+    return `${val.getUTCFullYear()}-${String(val.getUTCMonth()+1).padStart(2,'0')}-${String(val.getUTCDate()).padStart(2,'0')}`;
+  }
+  const s = String(val).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);            // YYYY-MM-DD
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);                 // DD-MM-YYYY (matches this app's own date inputs)
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null; // unparseable — leaving it blank is safer than guessing wrong
 }
 function guessHeaderRowIndex(rawRows){
   for(let i=0; i<Math.min(rawRows.length, 15); i++){
@@ -461,7 +503,7 @@ function parseTabularFile(file){
     else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
       reader.onload = e=>{ try{
-          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array', cellDates:true});
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
           const sheet=wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
           const headers = rows[0].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
@@ -506,13 +548,19 @@ async function onLoggedIn(session){
   await loadReviewQueue();
   await loadDisputes();
   await loadUsersAndThresholds();
+  await loadFXTable();
+  await loadFXRates();
 }
 (async function initAuth(){ const { data } = await sbClient.auth.getSession(); if(data.session) await onLoggedIn(data.session); })();
 
 async function loadCostHeaderOptions(){
   const { data } = await sbClient.from('cost_headers').select('*').order('code');
   document.getElementById('oi-header').innerHTML = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
-  if(data && data.length) document.getElementById('oi-grouptype').value = HEADER_GRAIN[data[0].code];
+  if(data && data.length){
+    const grain = HEADER_GRAIN[data[0].code];
+    document.getElementById('oi-grouptype').value = grain;
+    showGroupKeyPicker(grain);
+  }
 }
 
 /* ============================= SHIPMENT UPLOAD WITH COLUMN MAPPING ============================= */
@@ -663,15 +711,15 @@ async function getGroupProvisionalSum(header, groupType, groupKey){
   let shipmentIds = [];
   async function summarize(shipRows){
     const ids = (shipRows||[]).map(s=>s.shipment_id);
-    if(!ids.length) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
-    let sum = 0; const weights = {};
+    if(!ids.length) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0, provByShipment:{}};
+    let sum = 0; const weights = {}; const provByShipment = {};
     for(const chunk of chunkArray(ids,200)){
       const {data} = await sbClient.from('shipment_costs').select('shipment_id, provisional_amount').eq('cost_header', header).in('shipment_id', chunk);
-      (data||[]).forEach(r=> sum += (r.provisional_amount||0));
+      (data||[]).forEach(r=>{ sum += (r.provisional_amount||0); provByShipment[r.shipment_id] = r.provisional_amount||0; });
     }
     (shipRows||[]).forEach(r=> weights[r.shipment_id] = r.gross_weight||0);
     const totalWeight = (shipRows||[]).reduce((s,r)=> s+(r.gross_weight||0), 0);
-    return {sum, shipmentIds: ids, weights, totalWeight};
+    return {sum, shipmentIds: ids, weights, totalWeight, provByShipment};
   }
   if(groupType==='SHIPMENT'){ const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('shipment_id', groupKey)); return summarize(data); }
   else if(groupType==='MAWB'){ const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('mawb', groupKey)); return summarize(data); }
@@ -679,7 +727,7 @@ async function getGroupProvisionalSum(header, groupType, groupKey){
     const [nodeRaw, periodRaw] = groupKey.split('|');
     const node = (nodeRaw||'').trim(), period = (periodRaw||'').trim();
     const m = parseInt(period.split('-')[1], 10), y = parseInt(period.split('-')[0], 10);
-    if(!node || isNaN(m) || isNaN(y)) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
+    if(!node || isNaN(m) || isNaN(y)) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0, provByShipment:{}};
     const startDate = `${period}-01`;
     // First day of the FOLLOWING month, computed properly — not a hardcoded "-32" that
     // breaks for every month and silently returned zero shipments as if none existed.
@@ -687,7 +735,21 @@ async function getGroupProvisionalSum(header, groupType, groupKey){
     const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('node', node).gte('pickup_date', startDate).lt('pickup_date', endDate));
     return summarize(data);
   }
-  return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
+  return {sum:0, shipmentIds:[], weights:{}, totalWeight:0, provByShipment:{}};
+}
+
+/* ============================= FX RATES (manual master for now) ============================= */
+let FX_RATES_CACHE = null;
+async function loadFXRates(){
+  const { data } = await sbClient.from('fx_rates').select('*');
+  FX_RATES_CACHE = {}; (data||[]).forEach(r=> FX_RATES_CACHE[r.currency] = r.rate_to_inr);
+  if(!FX_RATES_CACHE.INR) FX_RATES_CACHE.INR = 1;
+  return FX_RATES_CACHE;
+}
+async function getFXRate(currency){
+  if(!currency || currency==='INR') return 1;
+  if(!FX_RATES_CACHE) await loadFXRates();
+  return FX_RATES_CACHE[currency] || null; // null = no rate on file, caller must handle
 }
 
 /* ============================= MULTI-MAWB BATCH UPLOAD ============================= */
@@ -695,64 +757,100 @@ let pendingMMFile = null, pendingMMRows = null;
 document.getElementById('mm-file').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   pendingMMFile = file;
+  await loadFXRates();
   try{
     const {rows, headers} = await parseTabularFile(file);
+    // Accept either a MAWB column or a Shipment column — whichever grain this batch's headers need.
     const mawbCol = headers.find(h=>normHeader(h)==='mawb');
-    if(!mawbCol){ document.getElementById('mm-preview').innerHTML = '<div class="note err">File must have a column literally named MAWB.</div>'; return; }
-    // detect Header{N}/Amount{N} pairs by name, however many exist
+    const shipCol = headers.find(h=>['shipment','shipment id'].includes(normHeader(h)));
+    if(!mawbCol && !shipCol){ document.getElementById('mm-preview').innerHTML = '<div class="note err">File must have a column literally named MAWB or Shipment (or Shipment ID).</div>'; return; }
+    const currCol = headers.find(h=>normHeader(h)==='currency');
     const pairNums = [...new Set(headers.map(h=>{ const m=h.match(/^Header(\d+)$/i); return m?parseInt(m[1],10):null; }).filter(n=>n!=null))].sort((a,b)=>a-b);
     if(!pairNums.length){ document.getElementById('mm-preview').innerHTML = '<div class="note err">No Header1/Amount1 (etc.) column pairs found — check column names exactly match Header1, Amount1, Header2, Amount2, ...</div>'; return; }
     const HEADER_CODE_BY_LABEL = Object.fromEntries(Object.entries(HEADER_LABEL).map(([code,label])=>[normHeader(label),code]));
     const parsed = [];
+    let unknownCurrency = null;
     rows.forEach(row=>{
-      const mawb = row[mawbCol] ? String(row[mawbCol]).trim() : null;
-      if(!mawb) return;
+      const key = mawbCol && row[mawbCol] ? String(row[mawbCol]).trim() : (shipCol && row[shipCol] ? String(row[shipCol]).trim() : null);
+      if(!key) return;
+      const groupType = (mawbCol && row[mawbCol]) ? 'MAWB' : 'SHIPMENT';
+      const currency = currCol && row[currCol] ? String(row[currCol]).trim().toUpperCase() : 'INR';
+      if(currency!=='INR' && FX_RATES_CACHE[currency]==null) unknownCurrency = currency;
       pairNums.forEach(n=>{
         const hCol = headers.find(h=>normHeader(h)===`header${n}`), aCol = headers.find(h=>normHeader(h)===`amount${n}`);
         const rawHeader = hCol ? String(row[hCol]||'').trim() : '';
         const amt = aCol ? num(row[aCol]) : NaN;
         if(!rawHeader || isNaN(amt)) return;
         const code = HEADER_CODE_BY_LABEL[normHeader(rawHeader)] || (HEADER_LABEL[rawHeader.toUpperCase()]?rawHeader.toUpperCase():null);
-        parsed.push({mawb, rawHeader, code, amount:amt});
+        parsed.push({groupKey:key, groupType, rawHeader, code, currency, originalAmount:amt});
       });
     });
+    if(unknownCurrency){ document.getElementById('mm-preview').innerHTML = `<div class="note err">No FX rate on file for currency "${unknownCurrency}" — add it under Access &amp; Thresholds → FX Rates first.</div>`; return; }
     pendingMMRows = parsed;
-    renderMMPreview();
+    await renderMMPreview();
   }catch(err){ document.getElementById('mm-preview').innerHTML = `<div class="note err">Could not read file: ${err.message}</div>`; }
 });
-function renderMMPreview(){
+async function renderMMPreview(){
   const box = document.getElementById('mm-preview');
   const taxable = num(document.getElementById('mm-amount').value);
   const unknownCodes = [...new Set(pendingMMRows.filter(r=>!r.code).map(r=>r.rawHeader))];
-  const fileSum = pendingMMRows.reduce((s,r)=>s+r.amount,0);
-  const mawbCount = new Set(pendingMMRows.map(r=>r.mawb)).size;
+  // Preview-time conversion — uses current rates; the actual invoice locks whatever rate is
+  // current at the moment "Create & tag" is clicked, which may be a few seconds later.
+  const fileSumINR = pendingMMRows.reduce((s,r)=> s + r.originalAmount * (FX_RATES_CACHE[r.currency]||1), 0);
+  const groupCount = new Set(pendingMMRows.map(r=>r.groupType+':'+r.groupKey)).size;
+  const currenciesUsed = [...new Set(pendingMMRows.map(r=>r.currency))];
   let html = `<div class="ledgerstrip">
-    <div class="cell"><div class="lab">MAWBs in file</div><div class="val">${mawbCount}</div></div>
+    <div class="cell"><div class="lab">Groups in file</div><div class="val">${groupCount}</div></div>
     <div class="cell"><div class="lab">Line items</div><div class="val">${pendingMMRows.length}</div></div>
-    <div class="cell"><div class="lab">File total</div><div class="val">${fmt(fileSum)}</div></div>
+    <div class="cell"><div class="lab">File total (converted to INR)</div><div class="val">${fmt(fileSumINR)}</div></div>
+    <div class="cell"><div class="lab">Currencies</div><div class="val" style="font-size:14px;">${currenciesUsed.join(', ')}</div></div>
   </div>`;
   const btn = document.getElementById('btn-create-mm-invoice');
   if(unknownCodes.length){
     html += `<div class="note err">Unrecognised cost header name(s): ${unknownCodes.join(', ')} — must exactly match a known header label (${Object.values(HEADER_LABEL).join(', ')}).</div>`;
     btn.disabled = true;
   } else if(isNaN(taxable)){
-    html += `<div class="note warn">Enter the taxable amount above to check it against the file total.</div>`;
+    html += `<div class="note warn">Enter the taxable amount (in INR) above to check it against the file total.</div>`;
     btn.disabled = true;
-  } else if(Math.abs(fileSum - taxable) > 0.001){
-    html += `<div class="note err">Sum mismatch: file totals ${fmt(fileSum)}, invoice taxable amount is ${fmt(taxable)} — gap of ${fmt(fileSum-taxable)}. Zero tolerance: this must be exact before the invoice can be created.</div>`;
+  } else if(Math.abs(fileSumINR - taxable) > 0.001){
+    html += `<div class="note err">Sum mismatch: file totals ${fmt(fileSumINR)} (INR, converted), invoice taxable amount is ${fmt(taxable)} — gap of ${fmt(fileSumINR-taxable)}. Zero tolerance: this must be exact before the invoice can be created.</div>`;
     btn.disabled = true;
   } else {
-    html += `<div class="note integration">Sum matches exactly. Ready to create — ${pendingMMRows.length} lines across ${mawbCount} MAWB(s), each independently lockable and actionable.</div>`;
-    btn.disabled = false;
+    html += `<div class="note integration">Sum matches exactly. Checking group keys against real shipments…</div>`;
+    btn.disabled = true;
+    const badKeys = await checkGroupsExist(pendingMMRows);
+    if(badKeys.length){
+      html += `<div class="note err">Blocked: these groups match zero shipments — fix before creating: ${badKeys.join(', ')}</div>`;
+      btn.disabled = true;
+    } else {
+      html = html.replace('Checking group keys against real shipments…', `Every group matched real shipments. Ready to create — ${pendingMMRows.length} lines across ${groupCount} group(s), each independently lockable and actionable.`);
+      btn.disabled = false;
+    }
   }
   box.innerHTML = html;
+}
+// Batched existence check — one query per grain, not one per row, even for a 38-line file.
+async function checkGroupsExist(rows){
+  const mawbs = [...new Set(rows.filter(r=>r.groupType==='MAWB').map(r=>r.groupKey))];
+  const shipIds = [...new Set(rows.filter(r=>r.groupType==='SHIPMENT').map(r=>r.groupKey))];
+  const bad = [];
+  if(mawbs.length){
+    const { data } = await sbClient.from('shipments').select('mawb').in('mawb', mawbs);
+    const found = new Set((data||[]).map(r=>r.mawb));
+    mawbs.forEach(m=>{ if(!found.has(m)) bad.push('MAWB:'+m); });
+  }
+  if(shipIds.length){
+    const { data } = await sbClient.from('shipments').select('shipment_id').in('shipment_id', shipIds);
+    const found = new Set((data||[]).map(r=>r.shipment_id));
+    shipIds.forEach(s=>{ if(!found.has(s)) bad.push('Shipment:'+s); });
+  }
+  return bad;
 }
 document.getElementById('mm-amount').addEventListener('input', ()=>{ if(pendingMMRows) renderMMPreview(); });
 document.getElementById('btn-create-mm-invoice').addEventListener('click', async ()=>{
   const vendor = document.getElementById('mm-vendor').value.trim();
   const invnum = document.getElementById('mm-invnum').value.trim();
   const date = document.getElementById('mm-date').value;
-  const currency = document.getElementById('mm-currency').value.trim() || 'INR';
   const amount = num(document.getElementById('mm-amount').value);
   const sourceFile = document.getElementById('mm-source').files[0];
   const backupFile = document.getElementById('mm-backup').files[0];
@@ -763,29 +861,89 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   const sourcePath = await uploadDoc(sourceFile, 'other-header');
   const backupPath = backupFile ? await uploadDoc(backupFile, 'other-header') : null;
   if(!sourcePath){ statusEl.textContent = 'Source document upload failed.'; return; }
+  await loadFXRates(); // fresh rates at the moment of creation — this is what gets locked
   const { data: invRow, error } = await sbClient.from('invoices').insert({
-    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency, taxable_amount:amount,
+    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency:'INR', taxable_amount:amount,
     source_file_path:sourcePath, backup_file_path:backupPath, status:'PENDING_REVIEW', entered_by:CURRENT_USER.id
   }).select().single();
   if(error){ statusEl.textContent = 'Could not create invoice: '+error.message; return; }
-  statusEl.textContent = `Tagging ${pendingMMRows.length} MAWB lines…`;
+  statusEl.textContent = `Tagging ${pendingMMRows.length} lines…`;
   for(const r of pendingMMRows){
-    await sbClient.from('invoice_tags').insert({invoice_id:invRow.id, cost_header:r.code, group_type:'MAWB', group_key:r.mawb, entered_amount:r.amount, status:'LOCKED', tagged_by:CURRENT_USER.id});
-    await lockGroupCosts(r.code, 'MAWB', r.mawb, invRow.id);
+    const rate = FX_RATES_CACHE[r.currency] || 1;
+    const convertedAmount = r.originalAmount * rate;
+    await sbClient.from('invoice_tags').insert({
+      invoice_id:invRow.id, cost_header:r.code, group_type:r.groupType, group_key:r.groupKey,
+      entered_amount:convertedAmount, original_currency:r.currency, original_amount:r.originalAmount, fx_rate_used:rate,
+      status:'LOCKED', tagged_by:CURRENT_USER.id
+    });
+    await lockGroupCosts(r.code, r.groupType, r.groupKey, invRow.id);
   }
-  await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, `Multi-MAWB batch: ${pendingMMRows.length} lines across ${new Set(pendingMMRows.map(r=>r.mawb)).size} MAWBs`);
-  statusEl.textContent = `Invoice #${invRow.id} created with ${pendingMMRows.length} MAWB lines. Review each line individually under "View detail".`;
+  await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, `Multi-MAWB batch: ${pendingMMRows.length} lines`);
+  statusEl.textContent = `Invoice #${invRow.id} created with ${pendingMMRows.length} lines. Review each line individually under "View detail".`;
   pendingMMRows = null; document.getElementById('mm-preview').innerHTML='';
   ['mm-vendor','mm-invnum','mm-amount'].forEach(id=>document.getElementById(id).value='');
   await loadOtherInvoices(); await loadReviewQueue();
 });
 
 /* ============================= LIVE PREVIEW ON INVOICE FORM ============================= */
+let ALL_NODES_CACHE = null;
+async function loadNodeOptions(){
+  if(ALL_NODES_CACHE) return ALL_NODES_CACHE;
+  const rows = await fetchAllRows('shipments', 'node', q=>q.not('node','is',null));
+  ALL_NODES_CACHE = [...new Set(rows.map(r=>r.node).filter(Boolean))].sort();
+  const sel = document.getElementById('oi-node-select');
+  sel.innerHTML = '<option value="">— choose node —</option>' + ALL_NODES_CACHE.map(n=>`<option value="${n}">${n}</option>`).join('');
+  return ALL_NODES_CACHE;
+}
+function showGroupKeyPicker(groupType){
+  document.getElementById('oi-groupkey-mawb').style.display = groupType==='MAWB' ? 'block' : 'none';
+  document.getElementById('oi-groupkey-shipment').style.display = groupType==='SHIPMENT' ? 'block' : 'none';
+  document.getElementById('oi-groupkey-node').style.display = groupType==='NODE_PERIOD' ? 'block' : 'none';
+  document.getElementById('oi-groupkey').value = '';
+  document.getElementById('oi-mawb-search').value = '';
+  document.getElementById('oi-shipment-search').value = '';
+  document.getElementById('oi-node-select').value = '';
+  document.getElementById('oi-period-picker').value = '';
+  if(groupType==='NODE_PERIOD') loadNodeOptions();
+}
 document.getElementById('oi-header').addEventListener('change', ()=>{
-  document.getElementById('oi-grouptype').value = HEADER_GRAIN[document.getElementById('oi-header').value];
+  const grain = HEADER_GRAIN[document.getElementById('oi-header').value];
+  document.getElementById('oi-grouptype').value = grain;
+  showGroupKeyPicker(grain);
   refreshInvoicePreview();
 });
-['oi-groupkey','oi-amount'].forEach(id=> document.getElementById(id).addEventListener('input', debounce(refreshInvoicePreview, 500)));
+// MAWB / Shipment: live search-as-you-type, populating a <datalist> from real data —
+// avoids a giant plain dropdown for fields with thousands of distinct values.
+async function searchDistinctValues(table, column, prefix, limit=20){
+  if(!prefix || prefix.length<2) return [];
+  const { data } = await sbClient.from(table).select(column).ilike(column, `${prefix}%`).limit(limit);
+  return [...new Set((data||[]).map(r=>r[column]).filter(Boolean))];
+}
+document.getElementById('oi-mawb-search').addEventListener('input', debounce(async (e)=>{
+  const val = e.target.value.trim();
+  const matches = await searchDistinctValues('shipments','mawb', val);
+  document.getElementById('mawb-datalist').innerHTML = matches.map(m=>`<option value="${m}">`).join('');
+  document.getElementById('oi-groupkey').value = val;
+  refreshInvoicePreview();
+}, 400));
+document.getElementById('oi-shipment-search').addEventListener('input', debounce(async (e)=>{
+  const val = e.target.value.trim();
+  const matches = await searchDistinctValues('shipments','shipment_id', val);
+  document.getElementById('shipment-datalist').innerHTML = matches.map(m=>`<option value="${m}">`).join('');
+  document.getElementById('oi-groupkey').value = val;
+  refreshInvoicePreview();
+}, 400));
+// Node + Period: two proper inputs, combined into the Node|YYYY-MM convention automatically —
+// removes the exact class of error (missing period, stray whitespace) hit during testing.
+function updateNodePeriodGroupKey(){
+  const node = document.getElementById('oi-node-select').value;
+  const period = document.getElementById('oi-period-picker').value; // native month input, always YYYY-MM
+  document.getElementById('oi-groupkey').value = (node && period) ? `${node}|${period}` : '';
+  refreshInvoicePreview();
+}
+document.getElementById('oi-node-select').addEventListener('change', updateNodePeriodGroupKey);
+document.getElementById('oi-period-picker').addEventListener('change', updateNodePeriodGroupKey);
+document.getElementById('oi-amount').addEventListener('input', debounce(refreshInvoicePreview, 500));
 
 function draftDisputeText(headerLabel, groupType, groupKey, totalW, shipCount, provSum, actual){
   return `Provisional ${headerLabel} cost for ${groupType} ${groupKey} was based on ${fmt(totalW)} kg across ${shipCount} shipment(s), totalling ${fmt(provSum)}. The invoice states ${fmt(actual)} — a difference of ${fmt(actual-provSum)}. Please confirm before this variance is accepted.`;
@@ -862,6 +1020,9 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   const statusEl = document.getElementById('oi-status');
 
   if(!vendor || isNaN(amount) || !sourceFile || !groupKey){ statusEl.textContent = 'Vendor, taxable amount, source document, and group key are all required.'; return; }
+  statusEl.textContent = 'Checking the group key matches real shipments…';
+  const precheck = await getGroupProvisionalSum(header, groupType, groupKey);
+  if(!precheck.shipmentIds.length){ statusEl.textContent = `Blocked: no shipments found for ${groupType} = "${groupKey}". Fix the group key before this can be created — an invoice can't be tagged against nothing.`; return; }
   statusEl.textContent = 'Checking for duplicate invoice number…';
   await ensureVendor(vendor);
   let duplicateOf = null;
@@ -927,21 +1088,26 @@ function wireInvoiceCardActions(scope){
   scope.querySelectorAll('.act-accept-tag').forEach(b=>b.addEventListener('click', e=> acceptTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
   scope.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
 }
+const DETAIL_SNAPSHOT_CACHE = {}; // invoiceId -> tagSummaries computed when detail was opened — Export and Accept both read from this within one session, so they can never silently diverge from a live re-query in between.
 async function toggleInvoiceDetail(invoiceId){
   const slot = document.getElementById('detail-'+invoiceId);
   if(slot.style.display==='block'){ slot.style.display='none'; return; }
   slot.style.display='block'; slot.innerHTML = '<div class="small">Loading…</div>';
   const {inv, tagSummaries, isMultiLob, lobs} = await computeInvoiceSummary(invoiceId);
+  DETAIL_SNAPSHOT_CACHE[invoiceId] = tagSummaries;
   let docLink = '';
   if(inv.source_file_path){
     try{ const {data} = await sbClient.storage.from('invoice-documents').createSignedUrl(inv.source_file_path, 3600); if(data?.signedUrl) docLink = `<a href="${data.signedUrl}" target="_blank" class="small">Open source document</a><br>`; }catch(e){}
   }
-  let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'');
+  let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'')
+    + (inv.duplicate_of_invoice_id ? `<div class="note err">Flagged as a possible duplicate of invoice #${inv.duplicate_of_invoice_id} — accepting any line below will ask you to confirm you've checked this.</div>` : '')
+    + (['DRAFT','PENDING_REVIEW'].includes(inv.status) ? `<div class="row-actions"><button class="btn red btn-sm act-cancel-invoice" data-inv="${invoiceId}">Cancel this invoice &amp; release its locks</button></div>` : '');
   tagSummaries.forEach(t=>{
     const zeroMatch = t.summary.shipmentIds.length===0;
     html += `<div class="note" style="background:#fff;" data-tagbox="${t.tag.id}">
       <b>${HEADER_LABEL[t.tag.cost_header]||t.tag.cost_header}</b> · ${t.tag.group_type}:${t.tag.group_key} — ${t.summary.shipmentIds.length} shipment(s), ${fmt(t.totalW)} kg
       <span class="status-pill st-${(t.tag.status||'').toLowerCase()}">${t.tag.status}</span><br>
+      ${t.tag.original_currency && t.tag.original_currency!=='INR' ? `Original: ${fmt(t.tag.original_amount)} ${t.tag.original_currency} @ ${t.tag.fx_rate_used} = ` : ''}
       Provisional: ${fmt(t.summary.sum)} · Actual: ${fmt(t.actual)} · Variance: <span style="color:${t.variance>0?'var(--red)':(t.variance<0?'var(--teal)':'inherit')}">${fmt(t.variance)} (${t.pct.toFixed(2)}%)</span>
       ${zeroMatch ? `<div class="note err">No shipments matched this group key — cannot accept until this resolves. Check the group key against the shipment master (e.g. run a lookup for this exact MAWB in Shipment Lookup).</div>` : ''}
       <div class="row-actions">
@@ -954,16 +1120,23 @@ async function toggleInvoiceDetail(invoiceId){
   slot.innerHTML = html;
   slot.querySelectorAll('.act-accept-tag').forEach(b=>b.addEventListener('click', e=> acceptTag(e.target.dataset.tag, invoiceId)));
   slot.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, invoiceId)));
-  slot.querySelectorAll('.act-export-alloc').forEach(b=>b.addEventListener('click', e=> exportTagAllocation(e.target.dataset.tag, tagSummaries)));
+  slot.querySelectorAll('.act-export-alloc').forEach(b=>b.addEventListener('click', e=> exportTagAllocation(e.target.dataset.tag, DETAIL_SNAPSHOT_CACHE[invoiceId])));
+  slot.querySelectorAll('.act-cancel-invoice').forEach(b=>b.addEventListener('click', e=> cancelInvoice(e.target.dataset.inv)));
 }
-// Excel export: shipment-by-shipment allocation for one MAWB/header line.
+// Excel export: shipment-by-shipment allocation, WITH the provisional/delta comparison —
+// not just the final allocated figure. Reads from the same cached snapshot Accept uses.
 function exportTagAllocation(tagId, tagSummaries){
-  const t = tagSummaries.find(x=>String(x.tag.id)===String(tagId));
+  const t = (tagSummaries||[]).find(x=>String(x.tag.id)===String(tagId));
   if(!t) return;
   const totalW = t.totalW || 1;
   const rows = t.summary.shipmentIds.map(sid=>{
     const share = totalW>0 ? (t.summary.weights[sid]||0)/totalW : 1/t.summary.shipmentIds.length;
-    return { 'Shipment ID': sid, 'Weight (kg)': t.summary.weights[sid]||0, 'Share %': (share*100).toFixed(4), 'Allocated Amount': (t.actual*share).toFixed(2) };
+    const allocated = t.actual*share;
+    const prov = t.summary.provByShipment[sid] || 0;
+    const delta = allocated - prov;
+    return { 'Shipment ID': sid, 'Weight (kg)': t.summary.weights[sid]||0, 'Share %': (share*100).toFixed(4),
+      'Provisional Amount': prov.toFixed(2), 'Allocated Amount': allocated.toFixed(2),
+      'Delta': delta.toFixed(2), 'Delta %': prov!==0 ? ((delta/prov)*100).toFixed(2) : (allocated!==0?'100.00':'0.00') };
   });
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -978,40 +1151,67 @@ async function checkAndFinalizeInvoiceStatus(invoiceId){
   await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
 }
 async function acceptTag(tagId, invoiceId){
-  const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
   const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+  if(inv.duplicate_of_invoice_id){
+    if(!confirm(`This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id}. Have you checked it isn't a real duplicate before accepting this line?`)) return;
+  }
+  // Prefer the cached snapshot from when the detail view opened (keeps this consistent
+  // with whatever the person actually looked at / exported), fall back to a fresh
+  // computation for the quick-action button path where no detail view was ever opened.
+  const cached = (DETAIL_SNAPSHOT_CACHE[invoiceId]||[]).find(x=>String(x.tag.id)===String(tagId));
+  const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
+  const summary = cached ? cached.summary : await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
   if(!summary.shipmentIds.length){ alert('No shipments matched this group key — cannot accept a line with zero matches. Fix the group key or the underlying shipment data first.'); return; }
   const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
   const variance = actual - summary.sum;
   const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
   for(const sid of summary.shipmentIds){
-    const { data: sc } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid).eq('cost_header', tag.cost_header).maybeSingle();
-    const prov = sc ? sc.provisional_amount : 0;
+    const prov = summary.provByShipment[sid] || 0;
     const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
     const shipmentActual = prov + share*variance;
-    await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
+    const { error: scErr } = await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
+    if(scErr){ alert(`Accept failed while writing shipment ${sid}: ${scErr.message}. Nothing further was written for this line — safe to retry.`); return; }
   }
-  await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
+  const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
+  if(tagErr){ alert(`Shipment costs were updated, but marking this line as done failed: ${tagErr.message}. Please retry — re-running Accept on this line is safe, it will just recompute the same figures.`); return; }
   await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
   await checkAndFinalizeInvoiceStatus(invoiceId);
+  delete DETAIL_SNAPSHOT_CACHE[invoiceId];
   await loadOtherInvoices(); await loadReviewQueue();
   const slot = document.getElementById('detail-'+invoiceId); if(slot && slot.style.display==='block'){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
 }
 async function disputeTag(tagId, invoiceId){
-  const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
   const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+  const cached = (DETAIL_SNAPSHOT_CACHE[invoiceId]||[]).find(x=>String(x.tag.id)===String(tagId));
+  const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
+  const summary = cached ? cached.summary : await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
   const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
   const draft = draftDisputeText(HEADER_LABEL[tag.cost_header]||tag.cost_header, tag.group_type, tag.group_key, summary.totalWeight, summary.shipmentIds.length, summary.sum, actual);
   const text = prompt('Dispute text for this line (edit as needed):', draft);
   if(text===null) return;
-  await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[${tag.group_type}:${tag.group_key} · ${HEADER_LABEL[tag.cost_header]||tag.cost_header}] ${text}`, raised_by:CURRENT_USER.id});
-  await sbClient.from('invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
+  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[${tag.group_type}:${tag.group_key} · ${HEADER_LABEL[tag.cost_header]||tag.cost_header}] ${text}`, raised_by:CURRENT_USER.id});
+  if(dErr){ alert('Could not raise dispute: '+dErr.message); return; }
+  const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
+  if(tagErr){ alert('Dispute was recorded, but marking this line as disputed failed: '+tagErr.message+'. Please retry.'); return; }
   await logAction(invoiceId, 'LINE_DISPUTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
   await checkAndFinalizeInvoiceStatus(invoiceId);
+  delete DETAIL_SNAPSHOT_CACHE[invoiceId];
   await loadOtherInvoices(); await loadDisputes(); await loadReviewQueue();
   const slot = document.getElementById('detail-'+invoiceId); if(slot && slot.style.display==='block'){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+}
+// Cancel a pending/draft invoice: releases every lock it's holding back to OPEN, and
+// soft-deletes the invoice (kept for audit trail, not hard-deleted).
+async function cancelInvoice(invoiceId){
+  if(!confirm('Cancel this invoice and release all its locks? This cannot be undone.')) return;
+  const { data: tags } = await sbClient.from('invoice_tags').select('id').eq('invoice_id', invoiceId);
+  for(const t of (tags||[])){
+    await sbClient.from('shipment_costs').update({status:'OPEN', locked_by_invoice_id:null}).eq('locked_by_invoice_id', invoiceId);
+    await sbClient.from('invoice_tags').update({status:'RELEASED'}).eq('id', t.id);
+  }
+  await sbClient.from('box_lm_costs').update({status:'OPEN', locked_by_invoice_id:null}).eq('locked_by_invoice_id', invoiceId);
+  await sbClient.from('invoices').update({status:'CANCELLED'}).eq('id', invoiceId);
+  await logAction(invoiceId, 'CANCELLED', CURRENT_USER.id, 'Invoice cancelled, locks released');
+  await loadOtherInvoices(); await loadLMInvoiceGroups(); await loadReviewQueue();
 }
 async function finalizeApproval(invoiceId){
   const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
@@ -1192,19 +1392,36 @@ async function runShipmentLookup(){
   result.innerHTML = '<div class="small">Looking up…</div>';
   const { data: ship } = await sbClient.from('shipments').select('*').eq('shipment_id', sid).maybeSingle();
   if(!ship){ result.innerHTML = '<div class="emptystate">No shipment found with that ID.</div>'; return; }
-  const { data: costs } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid);
+  const { data: costsRaw } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid);
+  const costs = sortByHeaderOrder(costsRaw||[], 'cost_header');
   const { data: boxes } = await sbClient.from('box_lm_costs').select('*').eq('shipment_id', sid);
-  const totalProv = (costs||[]).reduce((s,c)=>s+(c.provisional_amount||0),0);
-  const totalAct = (costs||[]).reduce((s,c)=>s+(c.actual_amount!=null?c.actual_amount:c.provisional_amount),0);
+  const totalProv = costs.reduce((s,c)=>s+(c.provisional_amount||0),0);
+  const totalAct = costs.reduce((s,c)=>s+(c.actual_amount!=null?c.actual_amount:c.provisional_amount),0);
+  const revenue = ship.revenue_amount||0;
+  // fetch vendor/invoice-number for every distinct invoice referenced, one batched query
+  const invIds = [...new Set(costs.map(c=>c.locked_by_invoice_id).filter(Boolean))];
+  let invMap = {};
+  if(invIds.length){
+    const { data: invs } = await sbClient.from('invoices').select('id, vendor_code, invoice_number').in('id', invIds);
+    (invs||[]).forEach(i=> invMap[i.id] = i);
+  }
   let html = `<div class="ledgerstrip">
     <div class="cell"><div class="lab">LOB</div><div class="val" style="font-size:14px;">${ship.lob||'Unassigned'}</div></div>
-    <div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(ship.revenue_amount)}</div></div>
-    <div class="cell"><div class="lab">Contribution (provisional)</div><div class="val">${fmt((ship.revenue_amount||0)-totalProv)}</div></div>
-    <div class="cell"><div class="lab">Contribution (to-date actual)</div><div class="val">${fmt((ship.revenue_amount||0)-totalAct)}</div></div>
+    <div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(revenue)}</div></div>
+    <div class="cell"><div class="lab">Provisional GM%</div><div class="val">${gmPct(revenue,totalProv).toFixed(1)}%</div></div>
+    <div class="cell"><div class="lab">Actual GM%</div><div class="val">${gmPct(revenue,totalAct).toFixed(1)}%</div></div>
   </div>
   <div class="small">MAWB: ${ship.mawb||'—'} · Node: ${ship.node||'—'} · Pickup: ${ship.pickup_date||'—'} · Weight: ${fmt(ship.gross_weight)} kg</div>
   <div class="tablewrap"><table class="data"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th>Invoice</th></tr></thead><tbody>`;
-  (costs||[]).forEach(c=> html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'—'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td>${c.locked_by_invoice_id?`#${c.locked_by_invoice_id}`:''}</td></tr>`);
+  costs.forEach(c=>{
+    let invCell = '';
+    if(c.locked_by_invoice_id){
+      const inv = invMap[c.locked_by_invoice_id];
+      const label = inv ? `${inv.vendor_code} — ${inv.invoice_number||'#'+inv.id}` : `#${c.locked_by_invoice_id}`;
+      invCell = `${label} <a href="#" class="jump-invoice small" data-inv="${c.locked_by_invoice_id}">(view)</a> <a href="#" class="export-leg small" data-inv="${c.locked_by_invoice_id}" data-header="${c.cost_header}">(export allocation)</a>`;
+    }
+    html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'—'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td class="small">${invCell}</td></tr>`;
+  });
   html += `</tbody></table></div>`;
   if(boxes && boxes.length){
     html += `<h3 style="margin-top:12px;font-size:12px;">Last Mile box detail</h3><div class="tablewrap"><table class="data"><thead><tr><th>Box</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th></tr></thead><tbody>`;
@@ -1212,6 +1429,15 @@ async function runShipmentLookup(){
     html += `</tbody></table></div>`;
   }
   result.innerHTML = html;
+  result.querySelectorAll('.jump-invoice').forEach(a=>a.addEventListener('click', e=>{ e.preventDefault(); switchTab('inv-other'); setTimeout(()=>toggleInvoiceDetail(a.dataset.inv),200); }));
+  result.querySelectorAll('.export-leg').forEach(a=>a.addEventListener('click', async e=>{
+    e.preventDefault();
+    const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', a.dataset.inv).eq('cost_header', a.dataset.header).maybeSingle();
+    if(!tag){ alert('Could not find the tagging record for this line.'); return; }
+    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+    const actual = tag.entered_amount!=null ? tag.entered_amount : (await sbClient.from('invoices').select('taxable_amount').eq('id', tag.invoice_id).single()).data.taxable_amount;
+    exportTagAllocation(tag.id, [{tag, summary, actual, totalW: summary.totalWeight}]);
+  }));
 }
 
 /* ============================= AGING & WRITE-BACK ============================= */
@@ -1310,16 +1536,26 @@ async function togglePnLDrill(sid){
   const ship = PNL_SHIP_CACHE.get(sid);
   const legs = PNL_COSTS_CACHE.get(sid) || [];
   const { data: invLines } = await sbClient.from('invoice_tags').select('*, invoices(vendor_code, invoice_number, status)').or(`group_key.eq.${ship.mawb||'—'},group_key.eq.${sid}`);
+  const sortedLegs = sortByHeaderOrder(legs, 'cost_header');
+  const invByHeader = {}; (invLines||[]).forEach(t=> invByHeader[t.cost_header] = t);
   let html = `<div class="detail-box">
     <div class="small"><b>Shipment master fields:</b> Node: ${ship.node||'—'} · MAWB: ${ship.mawb||'—'} · Pickup: ${ship.pickup_date||'—'} · Gross weight: ${fmt(ship.gross_weight)} kg · Revenue currency: ${ship.revenue_currency||'—'} · Status: ${ship.shipment_status||'—'}</div>
     <h3 style="margin-top:10px;">1. Cost by header — provisional vs. actual</h3>
     <table class="data"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th>Invoice</th></tr></thead><tbody>`;
-  legs.forEach(c=> html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'<span class="status-pill st-review">provisional standing in</span>'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td>${c.locked_by_invoice_id?`<a href="#" class="jump-invoice" data-inv="${c.locked_by_invoice_id}">#${c.locked_by_invoice_id}</a>`:''}</td></tr>`);
-  if(!legs.length) html += `<tr><td colspan="5" class="small">No cost data for this shipment.</td></tr>`;
+  sortedLegs.forEach(c=>{
+    let invCell = '';
+    if(c.locked_by_invoice_id){
+      const t = invByHeader[c.cost_header];
+      const label = t && t.invoices ? `${t.invoices.vendor_code} — ${t.invoices.invoice_number||'#'+c.locked_by_invoice_id}` : `#${c.locked_by_invoice_id}`;
+      invCell = `${label} <a href="#" class="jump-invoice small" data-inv="${c.locked_by_invoice_id}">(view)</a>`;
+    }
+    html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'<span class="status-pill st-review">provisional standing in</span>'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td class="small">${invCell}</td></tr>`;
+  });
+  if(!sortedLegs.length) html += `<tr><td colspan="5" class="small">No cost data for this shipment.</td></tr>`;
   html += `</tbody></table>
     <h3 style="margin-top:10px;">2. Invoices booked against this shipment</h3>
     <table class="data"><thead><tr><th>Invoice</th><th>Vendor</th><th>Header · Group</th><th class="num">Apportioned amount</th><th>Status</th></tr></thead><tbody>`;
-  (invLines||[]).forEach(t=> html += `<tr><td><a href="#" class="jump-invoice" data-inv="${t.invoice_id}">#${t.invoice_id}</a></td><td>${t.invoices?.vendor_code||''}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</td><td class="num">${fmt(legs.find(l=>l.cost_header===t.cost_header)?.actual_amount)}</td><td><span class="status-pill st-${(t.invoices?.status||'').toLowerCase()}">${t.invoices?.status||''}</span></td></tr>`);
+  (invLines||[]).forEach(t=> html += `<tr><td>${t.invoices?.invoice_number||'#'+t.invoice_id} <a href="#" class="jump-invoice small" data-inv="${t.invoice_id}">(view)</a></td><td>${t.invoices?.vendor_code||''}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</td><td class="num">${fmt(legs.find(l=>l.cost_header===t.cost_header)?.actual_amount)}</td><td><span class="status-pill st-${(t.invoices?.status||'').toLowerCase()}">${t.invoices?.status||''}</span></td></tr>`);
   if(!invLines || !invLines.length) html += `<tr><td colspan="5" class="small">No invoices booked against this shipment yet.</td></tr>`;
   html += `</tbody></table></div>`;
   cell.innerHTML = html;
@@ -1348,6 +1584,24 @@ document.getElementById('btn-add-user').addEventListener('click', async ()=>{
   if(!user_id) return;
   await sbClient.from('user_profiles').upsert({user_id, full_name, role, lob});
   await loadUsersAndThresholds();
+});
+async function loadFXTable(){
+  const { data } = await sbClient.from('fx_rates').select('*').order('currency');
+  const tb = document.querySelector('#fx-table tbody'); tb.innerHTML='';
+  (data||[]).forEach(r=> tb.innerHTML += `<tr><td class="mono">${r.currency}</td><td class="num">${r.rate_to_inr}</td><td class="small">${r.updated_at?new Date(r.updated_at).toLocaleString():''}</td><td><button class="btn secondary btn-sm del-fx" data-cur="${r.currency}">Remove</button></td></tr>`);
+  tb.querySelectorAll('.del-fx').forEach(b=>b.addEventListener('click', async e=>{
+    if(e.target.dataset.cur==="INR"){ alert("INR is the base currency and cannot be removed."); return; }
+    await sbClient.from('fx_rates').delete().eq('currency', e.target.dataset.cur);
+    FX_RATES_CACHE = null; await loadFXTable();
+  }));
+}
+document.getElementById('btn-add-fx').addEventListener('click', async ()=>{
+  const currency = document.getElementById('new-fx-currency').value.trim().toUpperCase();
+  const rate = num(document.getElementById('new-fx-rate').value);
+  if(!currency || isNaN(rate)){ alert('Enter both a currency code and a rate.'); return; }
+  await sbClient.from('fx_rates').upsert({currency, rate_to_inr:rate, updated_by:CURRENT_USER.id, updated_at:new Date().toISOString()});
+  document.getElementById('new-fx-currency').value=''; document.getElementById('new-fx-rate').value='';
+  FX_RATES_CACHE = null; await loadFXTable();
 });
 
 /* ============================= TAB SWITCHING ============================= */
