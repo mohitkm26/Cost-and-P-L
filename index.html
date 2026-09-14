@@ -1355,23 +1355,6 @@ async function finalizeApproval(invoiceId){
   }
   await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
 }
-async function finalizeLMApproval(invoiceId){
-  await sbClient.from('box_lm_costs').update({status:'REVERSED'}).eq('locked_by_invoice_id', invoiceId);
-  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
-}
-async function acceptLMInvoice(invoiceId){
-  await finalizeLMApproval(invoiceId);
-  await logAction(invoiceId, 'ACCEPTED', CURRENT_USER.id, null);
-  await loadLMInvoiceGroups(); await loadReviewQueue();
-}
-async function disputeLMInvoice(invoiceId){
-  const text = prompt('Dispute text for this Last Mile invoice:'); if(text===null) return;
-  await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:text, raised_by:CURRENT_USER.id});
-  await sbClient.from('invoices').update({status:'DISPUTED'}).eq('id', invoiceId);
-  await logAction(invoiceId, 'DISPUTE_RAISED', CURRENT_USER.id, null);
-  await loadLMInvoiceGroups(); await loadDisputes(); await loadReviewQueue();
-}
-
 /* ============================= LAST MILE INVOICES ============================= */
 document.getElementById('btn-new-lm-invgroup').addEventListener('click', async ()=>{
   const name = document.getElementById('lm-inv-name').value.trim();
@@ -1387,50 +1370,94 @@ document.getElementById('btn-new-lm-invgroup').addEventListener('click', async (
   await loadLMInvoiceGroups();
 });
 async function loadLMInvoiceGroups(){
-  const { data } = await sbClient.from('invoices').select('*, invoice_lines(*)').order('created_at',{ascending:false}).limit(20);
-  const lmOnly = (data||[]).filter(g => g.currency==='INR' && (g.status==='DRAFT' || (g.invoice_lines && g.invoice_lines.length)) && !g.invoice_tags);
+  const { data } = await sbClient.from('invoices').select('*, invoice_lines(*), lm_invoice_tags(*)').order('created_at',{ascending:false}).limit(20);
+  const lmOnly = (data||[]).filter(g => g.currency==='INR' && !g.invoice_tags && (g.status==='DRAFT' || (g.invoice_lines&&g.invoice_lines.length) || (g.lm_invoice_tags&&g.lm_invoice_tags.length)));
   const wrap = document.getElementById('lm-invgroup-list');
   if(!lmOnly.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
-  wrap.innerHTML = lmOnly.map(g=>`
-    <div class="invcard" data-inv="${g.id}">
+  // One batched provisional lookup for every box referenced by any tag on screen, indexed for
+  // O(1) per-tag lookup — avoids a per-tag query even for a batch with thousands of lines.
+  const allBoxIds = [...new Set(lmOnly.flatMap(g=>(g.lm_invoice_tags||[]).flatMap(t=>t.box_ids||[])))];
+  const provMap = new Map();
+  for(const chunk of chunkArray(allBoxIds,200)){
+    if(!chunk.length) continue;
+    const { data: rows } = await sbClient.from('box_lm_costs').select('box_id, charge_code, amount').in('box_id', chunk);
+    (rows||[]).forEach(r=>{ const k = r.box_id+'|'+r.charge_code; provMap.set(k, (provMap.get(k)||0)+(r.amount||0)); });
+  }
+  const tagProvisional = (tag) => (tag.box_ids||[]).reduce((s,b)=> s+(provMap.get(b+'|'+tag.charge_code)||0), 0);
+  wrap.innerHTML = lmOnly.map(g=>{
+    const tags = g.lm_invoice_tags||[];
+    return `<div class="invcard" data-inv="${g.id}">
       <div class="hd"><div class="name">#${g.id} — ${g.vendor_code}</div><span class="status-pill st-${(g.status||'').toLowerCase()}">${g.status}</span></div>
-      <div class="meta">${(g.invoice_lines||[]).length} lines · Total: ${fmt(g.taxable_amount)}</div>
+      <div class="meta">${tags.length} line(s) · Total: ${fmt(g.taxable_amount)}</div>
       <div class="row-actions">
-        <label class="btn secondary btn-sm" style="cursor:pointer;">Attach detail file (CSV/XLSX)
+        <label class="btn secondary btn-sm" style="cursor:pointer;">Attach detail file (CSV/XLSX — box ID level only)
           <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-inv="${g.id}" class="attach-lm-detail">
         </label>
         <button class="btn secondary btn-sm toggle-lm-manual" data-inv="${g.id}">Add a line manually</button>
-        ${g.status==='PENDING_REVIEW' ? `<button class="btn teal btn-sm act-accept-lm" data-inv="${g.id}">Accept</button><button class="btn amber btn-sm act-dispute-lm" data-inv="${g.id}">Flag for dispute</button>` : ''}
       </div>
       <div class="lm-manual-entry" id="lm-manual-${g.id}" style="display:none;">
+        <label class="field">Shipment ID</label>
+        <div class="row-actions"><input type="text" class="lm-manual-ship" placeholder="e.g. X000868152" style="max-width:220px;"><button class="btn secondary btn-sm fetch-lm-boxes" data-inv="${g.id}">Fetch boxes</button></div>
+        <div class="lm-box-list small" style="margin-top:6px;"></div>
         <div class="grid2" style="margin-top:8px;">
-          <input type="text" class="lm-manual-box" placeholder="Box ID (e.g. X000862347B1) or Shipment ID">
           <input type="text" class="lm-manual-charge" placeholder="Charge code (e.g. Base Cost, Fuel Surcharge)">
+          <input type="text" class="lm-manual-currency" placeholder="Currency" value="INR" style="max-width:100px;">
         </div>
         <div class="row-actions">
           <input type="number" class="lm-manual-amount" placeholder="Amount" style="max-width:140px;">
           <button class="btn teal btn-sm add-lm-manual-line" data-inv="${g.id}">Add this line</button>
         </div>
+        <div class="note small">Select more than one box if this is one lump charge covering several boxes of this shipment (e.g. an LTL delivery) — the amount will be split across the selected boxes by weight (or evenly if weight isn't on file).</div>
       </div>
-    </div>`).join('');
-  wrap.querySelectorAll('.act-accept-lm').forEach(b=>b.addEventListener('click', e=> acceptLMInvoice(e.target.dataset.inv)));
-  wrap.querySelectorAll('.act-dispute-lm').forEach(b=>b.addEventListener('click', e=> disputeLMInvoice(e.target.dataset.inv)));
+      <div class="lm-file-mapping" id="lm-filemap-${g.id}" style="display:none;"></div>
+      ${tags.length ? `<div class="tablewrap" style="max-height:280px;"><table class="data"><thead><tr><th>Shipment</th><th>Box(es)</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th></th></tr></thead><tbody>
+        ${tags.map(t=>{
+          const prov = tagProvisional(t);
+          return `<tr><td class="mono">${t.shipment_id}</td><td class="mono small">${(t.box_ids||[]).join(', ')}</td><td>${t.charge_code}</td><td class="num">${fmt(prov)}</td><td class="num">${t.status==='REVERSED'?fmt(t.entered_amount):'—'}</td><td><span class="status-pill st-${(t.status||'').toLowerCase()}">${t.status}</span></td>
+          <td>${t.status==='LOCKED'?`<button class="btn teal btn-sm accept-lm-tag" data-tag="${t.id}" data-inv="${g.id}">Accept</button> <button class="btn amber btn-sm dispute-lm-tag" data-tag="${t.id}" data-inv="${g.id}">Dispute</button>`:''}</td></tr>`;
+        }).join('')}
+      </tbody></table></div>` : ''}
+    </div>`;
+  }).join('');
+  wireLMBatchCardActions(wrap);
+}
+function wireLMBatchCardActions(wrap){
+  wrap.querySelectorAll('.accept-lm-tag').forEach(b=>b.addEventListener('click', e=> acceptLMTag(e.target.dataset.tag, e.target.dataset.inv)));
+  wrap.querySelectorAll('.dispute-lm-tag').forEach(b=>b.addEventListener('click', e=> disputeLMTag(e.target.dataset.tag, e.target.dataset.inv)));
   wrap.querySelectorAll('.toggle-lm-manual').forEach(b=>b.addEventListener('click', e=>{
     const el = document.getElementById('lm-manual-'+e.target.dataset.inv);
     el.style.display = el.style.display==='block' ? 'none' : 'block';
   }));
+  wrap.querySelectorAll('.fetch-lm-boxes').forEach(b=>b.addEventListener('click', async e=>{
+    const card = e.target.closest('.invcard');
+    const shipmentId = card.querySelector('.lm-manual-ship').value.trim();
+    if(!shipmentId) return;
+    const { data: rows } = await sbClient.from('box_lm_costs').select('box_id, weight_used').eq('shipment_id', shipmentId);
+    const boxes = [...new Map((rows||[]).map(r=>[r.box_id, r.weight_used])).entries()];
+    const listEl = card.querySelector('.lm-box-list');
+    if(!boxes.length){ listEl.innerHTML = '<div class="note warn">No boxes found for this shipment — check the ID against Shipment Lookup.</div>'; return; }
+    listEl.innerHTML = `<label style="display:block;"><input type="checkbox" class="lm-box-selectall"> <b>Select all (${boxes.length})</b></label>` +
+      boxes.map(([boxId,w])=>`<label style="display:block;"><input type="checkbox" class="lm-box-check" value="${boxId}"> ${boxId}${w?` — ${w} kg`:''}</label>`).join('');
+    listEl.querySelector('.lm-box-selectall').addEventListener('change', ev=>{ listEl.querySelectorAll('.lm-box-check').forEach(c=>c.checked = ev.target.checked); });
+  }));
   wrap.querySelectorAll('.add-lm-manual-line').forEach(b=>b.addEventListener('click', async e=>{
     const invId = e.target.dataset.inv;
     const card = e.target.closest('.invcard');
-    const boxOrShip = card.querySelector('.lm-manual-box').value.trim();
-    const chargeRaw = card.querySelector('.lm-manual-charge').value.trim();
+    const shipmentId = card.querySelector('.lm-manual-ship').value.trim();
+    const selectedBoxes = [...card.querySelectorAll('.lm-box-check:checked')].map(c=>c.value);
+    const chargeCode = card.querySelector('.lm-manual-charge').value.trim();
+    const currency = card.querySelector('.lm-manual-currency').value.trim().toUpperCase() || 'INR';
     const amount = num(card.querySelector('.lm-manual-amount').value);
-    if(!boxOrShip || isNaN(amount)){ alert('Box/Shipment ID and amount are both required.'); return; }
-    const d = deriveFromRef(boxOrShip);
-    const shipmentId = d.boxId ? d.shipmentId : boxOrShip; // has a Bn suffix → treat as box; otherwise it's a shipment ID directly
-    const boxId = d.boxId || null;
-    await applyLMLines(invId, [{invoice_id:invId, shipment_id:shipmentId, box_id:boxId, charge_code_raw:chargeRaw, charge_code:null, amount}]);
-    card.querySelector('.lm-manual-box').value=''; card.querySelector('.lm-manual-charge').value=''; card.querySelector('.lm-manual-amount').value='';
+    if(!shipmentId || !selectedBoxes.length || !chargeCode || isNaN(amount)){ alert('Shipment ID, at least one box, charge code, and amount are all required.'); return; }
+    await loadFXRates();
+    if(currency!=='INR' && FX_RATES_CACHE[currency]==null){ alert(`No FX rate on file for "${currency}" — add it under Access & Thresholds → FX Rates first.`); return; }
+    const rate = FX_RATES_CACHE[currency]||1, convertedAmount = amount*rate;
+    const { error } = await sbClient.from('lm_invoice_tags').insert({invoice_id:invId, shipment_id:shipmentId, box_ids:selectedBoxes, charge_code:chargeCode, entered_amount:convertedAmount, original_currency:currency, original_amount:amount, fx_rate_used:rate, status:'LOCKED', tagged_by:CURRENT_USER.id, source:'manual'});
+    if(error){ alert('Could not add line: '+error.message); return; }
+    await sbClient.from('box_lm_costs').update({status:'LOCKED', locked_by_invoice_id:invId}).in('box_id', selectedBoxes).eq('charge_code', chargeCode).eq('status','OPEN');
+    const { data: inv } = await sbClient.from('invoices').select('taxable_amount').eq('id', invId).single();
+    await sbClient.from('invoices').update({taxable_amount:(inv?.taxable_amount||0)+convertedAmount, status:'PENDING_REVIEW'}).eq('id', invId);
+    await logAction(invId, 'LM_LINE_ADDED', CURRENT_USER.id, `${chargeCode} · ${shipmentId} (${selectedBoxes.length} box(es))`);
     await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
   }));
   wrap.querySelectorAll('.attach-lm-detail').forEach(inp=>{
@@ -1438,50 +1465,96 @@ async function loadLMInvoiceGroups(){
       const file = e.target.files[0]; if(!file) return;
       const invId = e.target.dataset.inv;
       const {rows, headers} = await parseTabularFile(file);
-      // Matched by substring, not exact equality — real vendor exports vary a lot (this UPS
-      // file's box-ID column is literally "original_customer_reference", which no exact-match
-      // alias list would ever anticipate). Broader aliases here on purpose, for the same reason.
-      // Aliases are checked in priority order (most specific first) across ALL headers before
-      // falling back to the next alias — not "first column in the file that matches anything,"
-      // which was matching lead_tracking_number (wrong) ahead of the real box-ID column, and
-      // a delivery-signature field ahead of the real charge-description column.
-      const findCol = (aliasesInPriorityOrder) => {
-        for(const a of aliasesInPriorityOrder){
-          const hit = headers.find(h=> normHeader(h)===a || normHeader(h).includes(a));
-          if(hit) return hit;
-        }
-        return undefined;
+      const findCol = (aliasesInPriorityOrder) => { for(const a of aliasesInPriorityOrder){ const hit = headers.find(h=> normHeader(h)===a || normHeader(h).includes(a)); if(hit) return hit; } return undefined; };
+      const guess = {
+        box: findCol(['box id','box','boxes','customer_reference','original_customer_reference','ref number','reference number','tracking number','reference','tracking']),
+        charge: findCol(['charge code','billed_description','nature of service','description']),
+        amount: findCol(['billed_amount','amount','amt']),
+        currency: findCol(['currency'])
       };
-      const shipCol = findCol(['shipment id','awb']); // 'shipment' alone is too broad — false-matches columns like "shipment_date"
-      const boxCol = findCol(['box id','box','boxes']);
-      const refCol = findCol(['customer_reference','original_customer_reference','ref number','reference number','tracking number','reference','tracking']);
-      const chargeCol = findCol(['charge code','billed_description','nature of service','description']);
-      const amtCol = findCol(['billed_amount','amount','amt']);
-      const lines = [];
-      rows.forEach(row=>{
-        let shipmentId='', boxId='';
-        if(shipCol && row[shipCol]){ shipmentId=String(row[shipCol]).trim(); boxId = boxCol && row[boxCol] ? String(row[boxCol]).trim() : ''; }
-        else if(refCol && row[refCol]){ const ref=String(row[refCol]).trim(); const m=ref.match(/^(.*?)(B\d{1,3})$/i); if(m){shipmentId=m[1];boxId=ref;}else shipmentId=ref; }
-        if(!shipmentId) return;
-        const amount = amtCol ? Math.abs(num(row[amtCol])) : NaN;
-        if(isNaN(amount)) return;
-        lines.push({invoice_id:invId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:chargeCol?String(row[chargeCol]).trim():'', charge_code:null, amount});
+      const mapDiv = document.getElementById('lm-filemap-'+invId);
+      mapDiv.style.display = 'block';
+      mapDiv.innerHTML = `<div class="note">Confirm column mapping before importing (box ID level only — no shipment-wide lump matching via file):</div>
+        <div class="grid2" style="margin-top:6px;">
+          <div><label class="field">Box ID column</label><select class="lmf-box">${headers.map(h=>`<option value="${h}" ${h===guess.box?'selected':''}>${h}</option>`).join('')}</select></div>
+          <div><label class="field">Amount column</label><select class="lmf-amount">${headers.map(h=>`<option value="${h}" ${h===guess.amount?'selected':''}>${h}</option>`).join('')}</select></div>
+          <div><label class="field">Charge code column</label><select class="lmf-charge"><option value="">— none, use vendor as charge code —</option>${headers.map(h=>`<option value="${h}" ${h===guess.charge?'selected':''}>${h}</option>`).join('')}</select></div>
+          <div><label class="field">Currency column (optional)</label><select class="lmf-currency"><option value="">— none, assume INR —</option>${headers.map(h=>`<option value="${h}" ${h===guess.currency?'selected':''}>${h}</option>`).join('')}</select></div>
+        </div>
+        <div class="row-actions"><button class="btn teal btn-sm lmf-confirm" data-inv="${invId}">Confirm mapping &amp; import ${rows.length} rows</button></div>`;
+      mapDiv.querySelector('.lmf-confirm').addEventListener('click', async ()=>{
+        const boxCol = mapDiv.querySelector('.lmf-box').value, amtCol = mapDiv.querySelector('.lmf-amount').value;
+        const chargeCol = mapDiv.querySelector('.lmf-charge').value, currCol = mapDiv.querySelector('.lmf-currency').value;
+        await loadFXRates();
+        const { data: invRow } = await sbClient.from('invoices').select('vendor_code, taxable_amount').eq('id', invId).single();
+        let addedTotal = 0, skipped = 0, badCurrency = null;
+        const tagRows = [];
+        rows.forEach(row=>{
+          const boxId = row[boxCol] ? String(row[boxCol]).trim() : '';
+          const amt = num(row[amtCol]);
+          if(!boxId || isNaN(amt)){ skipped++; return; }
+          const d = deriveFromRef(boxId);
+          const currency = currCol && row[currCol] ? String(row[currCol]).trim().toUpperCase() : 'INR';
+          if(currency!=='INR' && FX_RATES_CACHE[currency]==null){ badCurrency = currency; return; }
+          const rate = FX_RATES_CACHE[currency]||1, converted = amt*rate;
+          tagRows.push({invoice_id:invId, shipment_id:d.shipmentId||boxId, box_ids:[boxId], charge_code: chargeCol&&row[chargeCol]?String(row[chargeCol]).trim():invRow.vendor_code, entered_amount:converted, original_currency:currency, original_amount:amt, fx_rate_used:rate, status:'LOCKED', tagged_by:CURRENT_USER.id, source:'file'});
+          addedTotal += converted;
+        });
+        if(badCurrency){ mapDiv.innerHTML += `<div class="note err">No FX rate on file for "${badCurrency}" — add it under Access & Thresholds → FX Rates first, then re-attach.</div>`; return; }
+        let inserted = 0, firstErr = null;
+        for(const chunk of chunkArray(tagRows,500)){
+          const { error } = await sbClient.from('lm_invoice_tags').insert(chunk);
+          if(error){ if(!firstErr) firstErr = error.message; continue; }
+          inserted += chunk.length;
+          for(const r of chunk){ await sbClient.from('box_lm_costs').update({status:'LOCKED', locked_by_invoice_id:invId}).in('box_id', r.box_ids).eq('charge_code', r.charge_code).eq('status','OPEN'); }
+        }
+        if(inserted < tagRows.length){ mapDiv.innerHTML += `<div class="note err">Only ${inserted} of ${tagRows.length} lines saved. First error: ${firstErr}</div>`; }
+        await sbClient.from('invoices').update({taxable_amount:(invRow.taxable_amount||0)+addedTotal, status:'PENDING_REVIEW'}).eq('id', invId);
+        await logAction(invId, 'LM_FILE_ATTACHED', CURRENT_USER.id, `${inserted} lines${skipped?`, ${skipped} rows skipped (missing box/amount)`:''}`);
+        mapDiv.style.display='none'; mapDiv.innerHTML='';
+        await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
       });
-      await applyLMLines(invId, lines);
-      await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
     });
   });
 }
-// Shared by both the file-attach path and manual entry — inserts invoice_lines, locks the
-// matching box_lm_costs rows, and adds to (not replaces) the invoice's running taxable_amount,
-// so manual lines and file-attached lines can both contribute to the same batch over time.
-async function applyLMLines(invId, lines){
-  if(!lines.length) return;
-  for(const chunk of chunkArray(lines,500)){ await sbClient.from('invoice_lines').insert(chunk.map(l=>({invoice_id:l.invoice_id, charge_code_raw:l.charge_code_raw, charge_code:l.charge_code, amount:l.amount}))); }
-  for(const l of lines){ if(l.box_id){ await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null); } }
-  const { data: inv } = await sbClient.from('invoices').select('taxable_amount').eq('id', invId).single();
-  const newTotal = (inv?.taxable_amount||0) + lines.reduce((s,l)=>s+l.amount,0);
-  await sbClient.from('invoices').update({taxable_amount: newTotal, status:'PENDING_REVIEW'}).eq('id', invId);
+async function acceptLMTag(tagId, invoiceId){
+  const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
+  const { data: boxRows } = await sbClient.from('box_lm_costs').select('*').in('box_id', tag.box_ids).eq('charge_code', tag.charge_code);
+  if(!boxRows || !boxRows.length){ alert('No provisional records found for these boxes + charge code — cannot accept. Check box_lm_costs has this box/charge combination.'); return; }
+  const provTotal = boxRows.reduce((s,r)=>s+(r.amount||0),0);
+  const variance = tag.entered_amount - provTotal;
+  const totalW = boxRows.reduce((s,r)=>s+(r.weight_used||0),0);
+  for(const r of boxRows){
+    const share = totalW>0 ? (r.weight_used||0)/totalW : 1/boxRows.length;
+    const boxActual = (r.amount||0) + share*variance;
+    const { error } = await sbClient.from('box_lm_costs').update({actual_amount:boxActual, status:'REVERSED', locked_by_invoice_id:invoiceId}).eq('id', r.id);
+    if(error){ alert(`Accept failed writing box ${r.box_id}: ${error.message}. Nothing further was written for this line — safe to retry.`); return; }
+  }
+  const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
+  if(tagErr){ alert('Boxes were updated, but marking this line as done failed: '+tagErr.message+'. Please retry.'); return; }
+  await logAction(invoiceId, 'LM_LINE_ACCEPTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id} (${tag.box_ids.length} box${tag.box_ids.length>1?'es':''})`);
+  await checkAndFinalizeLMInvoiceStatus(invoiceId);
+  await loadLMInvoiceGroups(); await loadReviewQueue();
+}
+async function disputeLMTag(tagId, invoiceId){
+  const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
+  const text = prompt('Dispute text for this line:', `Actual ${fmt(tag.entered_amount)} for ${tag.charge_code} on shipment ${tag.shipment_id} (box(es): ${tag.box_ids.join(', ')}) — please confirm before this is accepted.`);
+  if(text===null) return;
+  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[LM ${tag.shipment_id} · ${tag.charge_code}] ${text}`, raised_by:CURRENT_USER.id});
+  if(dErr){ alert('Could not raise dispute: '+dErr.message); return; }
+  const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
+  if(tagErr){ alert('Dispute recorded, but marking the line failed: '+tagErr.message); return; }
+  await logAction(invoiceId, 'LM_LINE_DISPUTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id}`);
+  await checkAndFinalizeLMInvoiceStatus(invoiceId);
+  await loadLMInvoiceGroups(); await loadDisputes(); await loadReviewQueue();
+}
+async function checkAndFinalizeLMInvoiceStatus(invoiceId){
+  const { data: tags } = await sbClient.from('lm_invoice_tags').select('status').eq('invoice_id', invoiceId);
+  if(!tags || !tags.length){ console.error(`checkAndFinalizeLMInvoiceStatus called for invoice ${invoiceId} with zero tags — refusing to approve.`); return; }
+  const anyLocked = tags.some(t=>t.status==='LOCKED');
+  const anyDisputed = tags.some(t=>t.status==='DISPUTED');
+  if(anyLocked) return;
+  await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
 }
 document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>{
   const { data: boxes } = await sbClient.from('box_lm_costs').select('*');
@@ -1501,19 +1574,21 @@ document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>
 /* ============================= REVIEW QUEUE (single-step, both flows) ============================= */
 async function loadReviewQueue(){
   const wrap = document.getElementById('queue-list');
-  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('status','PENDING_REVIEW').order('created_at');
+  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*), lm_invoice_tags(*)').eq('status','PENDING_REVIEW').order('created_at');
   if(!data || !data.length){ wrap.innerHTML = '<div class="emptystate">Nothing awaiting review.</div>'; return; }
   const withTags = data.filter(inv=> inv.invoice_tags && inv.invoice_tags.length);
   const lmInvoices = data.filter(inv=> !inv.invoice_tags || !inv.invoice_tags.length);
-  wrap.innerHTML = withTags.map(inv=>invoiceCardHTML(inv)).join('') + lmInvoices.map(inv=>`
-    <div class="invcard" data-inv="${inv.id}">
+  wrap.innerHTML = withTags.map(inv=>invoiceCardHTML(inv)).join('') + lmInvoices.map(inv=>{
+    const lmTagCount = (inv.lm_invoice_tags||[]).length;
+    const lockedCount = (inv.lm_invoice_tags||[]).filter(t=>t.status==='LOCKED').length;
+    return `<div class="invcard" data-inv="${inv.id}">
       <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code} <span class="small">(Last Mile)</span></div><span class="status-pill st-${(inv.status||'').toLowerCase()}">${inv.status}</span></div>
-      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency}</div>
-      <div class="row-actions"><button class="btn teal btn-sm act-accept-lm" data-inv="${inv.id}">Accept</button><button class="btn amber btn-sm act-dispute-lm" data-inv="${inv.id}">Flag for dispute</button></div>
-    </div>`).join('');
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} · ${lmTagCount} line(s), ${lockedCount} awaiting action</div>
+      <div class="row-actions"><button class="btn secondary btn-sm jump-lm-tab" data-inv="${inv.id}">Review lines in Last Mile tab</button></div>
+    </div>`;
+  }).join('');
   wireInvoiceCardActions(wrap);
-  wrap.querySelectorAll('.act-accept-lm').forEach(b=>b.addEventListener('click', e=> acceptLMInvoice(e.target.dataset.inv)));
-  wrap.querySelectorAll('.act-dispute-lm').forEach(b=>b.addEventListener('click', e=> disputeLMInvoice(e.target.dataset.inv)));
+  wrap.querySelectorAll('.jump-lm-tab').forEach(b=>b.addEventListener('click', ()=> switchTab('inv-lm')));
 }
 
 /* ============================= DISPUTES ============================= */
