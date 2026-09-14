@@ -1313,6 +1313,7 @@ document.getElementById('btn-new-lm-invgroup').addEventListener('click', async (
   const name = document.getElementById('lm-inv-name').value.trim();
   const sourceFile = document.getElementById('lm-source').files[0];
   if(!name || !sourceFile){ alert('Name and source document are both required.'); return; }
+  await ensureVendor(name); // invoices.vendor_code is a foreign key to vendors — must exist first
   const sourcePath = await uploadDoc(sourceFile, 'last-mile');
   const { data: invRow, error } = await sbClient.from('invoices').insert({
     vendor_code:name, taxable_amount:0, currency:'INR', source_file_path:sourcePath, status:'DRAFT', entered_by:CURRENT_USER.id
