@@ -222,6 +222,27 @@
         <label class="field">Line-item file (CSV/XLSX)</label><input type="file" id="mm-file">
       </div>
     </div>
+    <div class="subblock">
+      <h3>Or add lines manually <span class="small">(no file needed — same checks apply either way)</span></h3>
+      <div class="grid2">
+        <div>
+          <label class="field">Group type</label>
+          <select id="mline-grouptype"><option value="MAWB">MAWB</option><option value="SHIPMENT">Shipment</option></select>
+          <label class="field">Group key (MAWB # or Shipment ID)</label>
+          <input type="text" id="mline-groupkey">
+        </div>
+        <div>
+          <label class="field">Cost header</label>
+          <select id="mline-header"></select>
+          <label class="field">Currency</label>
+          <input type="text" id="mline-currency" value="INR" style="max-width:100px;">
+          <label class="field">Amount</label>
+          <input type="number" id="mline-amount">
+        </div>
+      </div>
+      <div class="row-actions"><button class="btn secondary btn-sm" id="btn-add-mline">Add line</button></div>
+      <div class="tablewrap" style="max-height:200px;"><table class="data" id="mline-table"><thead><tr><th>Group</th><th>Header</th><th class="num">Amount</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
     <div id="mm-preview"></div>
     <div class="row-actions"><button class="btn teal" id="btn-create-mm-invoice" disabled>Create &amp; tag (fix sum mismatch first)</button></div>
     <div id="mm-status" class="small" style="margin-top:6px;"></div>
@@ -412,6 +433,13 @@ const LM_COL_TO_CODE = {
 function fmt(n){ if(n===undefined||n===null||isNaN(n)) return '—'; return Number(n).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
 function num(v){ if(v===undefined||v===null||v==='') return NaN; const s=String(v).replace(/[₹,\s]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:n; }
 function normHeader(h){ return String(h||'').trim().toLowerCase(); }
+// A box ID always ends in "B" + digits (e.g. X000862347B1) — used to tell whether a typed
+// or file-provided reference is a box (belongs to a shipment) or a bare shipment ID.
+function deriveFromRef(ref){
+  const s = String(ref).trim();
+  const m = s.match(/^(.*?)(B\d{1,3})$/i);
+  return m ? {shipmentId:m[1], boxId:s} : {shipmentId:s, boxId:''};
+}
 function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
 // Supabase/PostgREST caps a single .select() around 1000 rows by default.
 // Any "fetch the whole table" query MUST page through with .range(), or it
@@ -571,6 +599,7 @@ async function loadCostHeaderOptions(){
   const { data } = await sbClient.from('cost_headers').select('*').order('code');
   document.getElementById('oi-header').innerHTML = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
   if(data && data.length) applyHeaderGrainOptions(data[0].code);
+  populateMlineHeaderOptions();
 }
 // Shows the grain selector only when a header genuinely has more than one valid grain;
 // otherwise behaves exactly as before (silently locked to the header's single grain).
@@ -779,6 +808,40 @@ async function getFXRate(currency){
 
 /* ============================= MULTI-MAWB BATCH UPLOAD ============================= */
 let pendingMMFile = null, pendingMMRows = null;
+function populateMlineHeaderOptions(){
+  document.getElementById('mline-header').innerHTML = document.getElementById('oi-header').innerHTML;
+}
+function renderMlineTable(){
+  const tb = document.querySelector('#mline-table tbody'); tb.innerHTML='';
+  (pendingMMRows||[]).forEach((r,i)=>{
+    tb.innerHTML += `<tr><td class="mono">${r.groupType}:${r.groupKey}</td><td>${HEADER_LABEL[r.code]||r.rawHeader}</td><td class="num">${fmt(r.originalAmount)} ${r.currency}</td><td><button class="btn secondary btn-sm rm-mline" data-i="${i}">Remove</button></td></tr>`;
+  });
+  document.querySelectorAll('.rm-mline').forEach(b=>b.addEventListener('click', e=>{
+    pendingMMRows.splice(parseInt(e.target.dataset.i,10),1);
+    renderMMPreview();
+  }));
+}
+document.getElementById('btn-add-mline').addEventListener('click', async ()=>{
+  await loadFXRates();
+  const groupType = document.getElementById('mline-grouptype').value;
+  const groupKey = document.getElementById('mline-groupkey').value.trim();
+  const headerCode = document.getElementById('mline-header').value;
+  const currency = document.getElementById('mline-currency').value.trim().toUpperCase() || 'INR';
+  const amount = num(document.getElementById('mline-amount').value);
+  if(!groupKey || isNaN(amount)){ alert('Group key and amount are both required.'); return; }
+  if(HEADER_VALID_GRAINS[headerCode] && !HEADER_VALID_GRAINS[headerCode].includes(groupType)){
+    alert(`${HEADER_LABEL[headerCode]} can only be billed at ${HEADER_VALID_GRAINS[headerCode].map(g=>GRAIN_LABEL[g]).join(' or ')} level, not ${GRAIN_LABEL[groupType]}.`);
+    return;
+  }
+  if(currency!=='INR' && FX_RATES_CACHE[currency]==null){ alert(`No FX rate on file for "${currency}" — add it under Access & Thresholds → FX Rates first.`); return; }
+  if((pendingMMRows||[]).some(r=>r.groupType===groupType && r.groupKey===groupKey && r.code===headerCode)){
+    alert('This exact group + header combination is already in the list — the same charge code can\'t be added twice for one group.'); return;
+  }
+  if(!pendingMMRows) pendingMMRows = [];
+  pendingMMRows.push({groupKey, groupType, rawHeader:HEADER_LABEL[headerCode], code:headerCode, currency, originalAmount:amount});
+  document.getElementById('mline-groupkey').value=''; document.getElementById('mline-amount').value='';
+  await renderMMPreview();
+});
 document.getElementById('mm-file').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   pendingMMFile = file;
@@ -829,6 +892,7 @@ document.getElementById('mm-file').addEventListener('change', async (e)=>{
   }catch(err){ document.getElementById('mm-preview').innerHTML = `<div class="note err">Could not read file: ${err.message}</div>`; }
 });
 async function renderMMPreview(){
+  renderMlineTable();
   const box = document.getElementById('mm-preview');
   const taxable = num(document.getElementById('mm-amount').value);
   const unknownCodes = [...new Set(pendingMMRows.filter(r=>!r.code).map(r=>r.rawHeader))];
@@ -1335,11 +1399,40 @@ async function loadLMInvoiceGroups(){
         <label class="btn secondary btn-sm" style="cursor:pointer;">Attach detail file (CSV/XLSX)
           <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-inv="${g.id}" class="attach-lm-detail">
         </label>
+        <button class="btn secondary btn-sm toggle-lm-manual" data-inv="${g.id}">Add a line manually</button>
         ${g.status==='PENDING_REVIEW' ? `<button class="btn teal btn-sm act-accept-lm" data-inv="${g.id}">Accept</button><button class="btn amber btn-sm act-dispute-lm" data-inv="${g.id}">Flag for dispute</button>` : ''}
+      </div>
+      <div class="lm-manual-entry" id="lm-manual-${g.id}" style="display:none;">
+        <div class="grid2" style="margin-top:8px;">
+          <input type="text" class="lm-manual-box" placeholder="Box ID (e.g. X000862347B1) or Shipment ID">
+          <input type="text" class="lm-manual-charge" placeholder="Charge code (e.g. Base Cost, Fuel Surcharge)">
+        </div>
+        <div class="row-actions">
+          <input type="number" class="lm-manual-amount" placeholder="Amount" style="max-width:140px;">
+          <button class="btn teal btn-sm add-lm-manual-line" data-inv="${g.id}">Add this line</button>
+        </div>
       </div>
     </div>`).join('');
   wrap.querySelectorAll('.act-accept-lm').forEach(b=>b.addEventListener('click', e=> acceptLMInvoice(e.target.dataset.inv)));
   wrap.querySelectorAll('.act-dispute-lm').forEach(b=>b.addEventListener('click', e=> disputeLMInvoice(e.target.dataset.inv)));
+  wrap.querySelectorAll('.toggle-lm-manual').forEach(b=>b.addEventListener('click', e=>{
+    const el = document.getElementById('lm-manual-'+e.target.dataset.inv);
+    el.style.display = el.style.display==='block' ? 'none' : 'block';
+  }));
+  wrap.querySelectorAll('.add-lm-manual-line').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.dataset.inv;
+    const card = e.target.closest('.invcard');
+    const boxOrShip = card.querySelector('.lm-manual-box').value.trim();
+    const chargeRaw = card.querySelector('.lm-manual-charge').value.trim();
+    const amount = num(card.querySelector('.lm-manual-amount').value);
+    if(!boxOrShip || isNaN(amount)){ alert('Box/Shipment ID and amount are both required.'); return; }
+    const d = deriveFromRef(boxOrShip);
+    const shipmentId = d.boxId ? d.shipmentId : boxOrShip; // has a Bn suffix → treat as box; otherwise it's a shipment ID directly
+    const boxId = d.boxId || null;
+    await applyLMLines(invId, [{invoice_id:invId, shipment_id:shipmentId, box_id:boxId, charge_code_raw:chargeRaw, charge_code:null, amount}]);
+    card.querySelector('.lm-manual-box').value=''; card.querySelector('.lm-manual-charge').value=''; card.querySelector('.lm-manual-amount').value='';
+    await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
+  }));
   wrap.querySelectorAll('.attach-lm-detail').forEach(inp=>{
     inp.addEventListener('change', async (e)=>{
       const file = e.target.files[0]; if(!file) return;
@@ -1360,12 +1453,21 @@ async function loadLMInvoiceGroups(){
         if(isNaN(amount)) return;
         lines.push({invoice_id:invId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:chargeCol?String(row[chargeCol]).trim():'', charge_code:null, amount});
       });
-      for(const chunk of chunkArray(lines,500)){ await sbClient.from('invoice_lines').insert(chunk.map(l=>({invoice_id:l.invoice_id, charge_code_raw:l.charge_code_raw, charge_code:l.charge_code, amount:l.amount}))); }
-      for(const l of lines){ if(l.box_id){ await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null); } }
-      await sbClient.from('invoices').update({taxable_amount: lines.reduce((s,l)=>s+l.amount,0), status:'PENDING_REVIEW'}).eq('id', invId);
+      await applyLMLines(invId, lines);
       await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
     });
   });
+}
+// Shared by both the file-attach path and manual entry — inserts invoice_lines, locks the
+// matching box_lm_costs rows, and adds to (not replaces) the invoice's running taxable_amount,
+// so manual lines and file-attached lines can both contribute to the same batch over time.
+async function applyLMLines(invId, lines){
+  if(!lines.length) return;
+  for(const chunk of chunkArray(lines,500)){ await sbClient.from('invoice_lines').insert(chunk.map(l=>({invoice_id:l.invoice_id, charge_code_raw:l.charge_code_raw, charge_code:l.charge_code, amount:l.amount}))); }
+  for(const l of lines){ if(l.box_id){ await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null); } }
+  const { data: inv } = await sbClient.from('invoices').select('taxable_amount').eq('id', invId).single();
+  const newTotal = (inv?.taxable_amount||0) + lines.reduce((s,l)=>s+l.amount,0);
+  await sbClient.from('invoices').update({taxable_amount: newTotal, status:'PENDING_REVIEW'}).eq('id', invId);
 }
 document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>{
   const { data: boxes } = await sbClient.from('box_lm_costs').select('*');
