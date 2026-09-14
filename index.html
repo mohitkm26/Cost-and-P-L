@@ -1438,11 +1438,25 @@ async function loadLMInvoiceGroups(){
       const file = e.target.files[0]; if(!file) return;
       const invId = e.target.dataset.inv;
       const {rows, headers} = await parseTabularFile(file);
-      const shipCol = headers.find(h=>['shipment id','awb','shipment'].includes(normHeader(h)));
-      const boxCol = headers.find(h=>['box id','box','boxes'].includes(normHeader(h)));
-      const refCol = headers.find(h=>['ref number','reference number','tracking number'].includes(normHeader(h)));
-      const chargeCol = headers.find(h=>['charge code','nature of service','description'].includes(normHeader(h)));
-      const amtCol = headers.find(h=>['amount','billed_amount','amt'].includes(normHeader(h)));
+      // Matched by substring, not exact equality — real vendor exports vary a lot (this UPS
+      // file's box-ID column is literally "original_customer_reference", which no exact-match
+      // alias list would ever anticipate). Broader aliases here on purpose, for the same reason.
+      // Aliases are checked in priority order (most specific first) across ALL headers before
+      // falling back to the next alias — not "first column in the file that matches anything,"
+      // which was matching lead_tracking_number (wrong) ahead of the real box-ID column, and
+      // a delivery-signature field ahead of the real charge-description column.
+      const findCol = (aliasesInPriorityOrder) => {
+        for(const a of aliasesInPriorityOrder){
+          const hit = headers.find(h=> normHeader(h)===a || normHeader(h).includes(a));
+          if(hit) return hit;
+        }
+        return undefined;
+      };
+      const shipCol = findCol(['shipment id','awb']); // 'shipment' alone is too broad — false-matches columns like "shipment_date"
+      const boxCol = findCol(['box id','box','boxes']);
+      const refCol = findCol(['customer_reference','original_customer_reference','ref number','reference number','tracking number','reference','tracking']);
+      const chargeCol = findCol(['charge code','billed_description','nature of service','description']);
+      const amtCol = findCol(['billed_amount','amount','amt']);
       const lines = [];
       rows.forEach(row=>{
         let shipmentId='', boxId='';
