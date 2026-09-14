@@ -40,11 +40,11 @@
   .panel .desc{ color:var(--sub); font-size:11.5px; margin:0 0 10px; }
   .subblock{ border-top:1px solid var(--line); padding-top:10px; margin-top:10px; } .subblock:first-of-type{ border-top:none; padding-top:0; margin-top:0; }
   .subblock h3{ font-size:12px; font-weight:600; margin:0 0 6px; }
-  .subblock h3 .badge{ font-family:'IBM Plex Mono'; font-size:9.5px; color:var(--teal); border:1px solid var(--teal); border-radius:3px; padding:1px 6px; margin-left:6px; }
   label.field{ display:block; font-size:11px; color:var(--sub); margin:7px 0 3px; }
   input[type=text], input[type=number], input[type=date], input[type=email], input[type=password], select, textarea{
     width:100%; font-family:'IBM Plex Mono', monospace; font-size:12px; padding:6px 8px; border:1px solid var(--line-strong); border-radius:3px; background:#FBFCFB; color:var(--ink);}
-  textarea{ font-family:'IBM Plex Sans'; min-height:60px; }
+  textarea{ font-family:'IBM Plex Sans'; min-height:70px; }
+  select:disabled{ background:var(--slate-dim); color:var(--sub); }
   input[type=file]{ font-size:12px; }
   button.btn{ font-family:'IBM Plex Sans'; font-size:11.5px; font-weight:600; padding:6px 12px; background:var(--ink); color:#fff; border:none; border-radius:3px; cursor:pointer;}
   button.btn.secondary{ background:#fff; color:var(--ink); border:1px solid var(--line-strong); }
@@ -63,10 +63,10 @@
   .num{ font-family:'IBM Plex Mono'; text-align:right; white-space:nowrap; }
   .tablewrap{ max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:4px; margin-top:8px;}
   .status-pill{ display:inline-block; font-family:'IBM Plex Mono'; font-size:9.5px; font-weight:600; padding:2px 6px; border-radius:3px; white-space:nowrap;}
-  .st-matched,.st-approved{ background:var(--teal-dim); color:var(--teal); }
-  .st-pending,.st-draft{ background:var(--slate-dim); color:var(--sub); }
-  .st-review,.st-pending_approval{ background:var(--amber-dim); color:var(--amber); }
-  .st-exception,.st-rejected,.st-disputed{ background:var(--red-dim); color:var(--red); }
+  .st-matched,.st-approved,.st-reversed,.st-agreed,.st-settled{ background:var(--teal-dim); color:var(--teal); }
+  .st-pending,.st-draft,.st-open{ background:var(--slate-dim); color:var(--sub); }
+  .st-review,.st-pending_review,.st-locked{ background:var(--amber-dim); color:var(--amber); }
+  .st-exception,.st-rejected,.st-disputed,.st-raised,.st-denied{ background:var(--red-dim); color:var(--red); }
   .ledgerstrip{ display:flex; border:1px solid var(--line-strong); border-radius:4px; background:var(--panel); margin-bottom:14px; overflow-x:auto;}
   .ledgerstrip .cell{ flex:1; padding:11px 15px; border-right:1px solid var(--line); min-width:130px;}
   .ledgerstrip .cell:last-child{ border-right:none; }
@@ -81,7 +81,6 @@
   .invcard .hd{ display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:6px; }
   .invcard .hd .name{ font-weight:600; font-size:12.5px; }
   .invcard .meta{ font-size:10.5px; color:var(--sub); margin-top:3px; }
-  .line-row{ display:grid; grid-template-columns:2fr 1fr auto; gap:6px; margin-bottom:5px; align-items:center;}
   .modalbg{ position:fixed; inset:0; background:rgba(20,30,25,0.45); display:none; align-items:flex-start; justify-content:center; padding:40px 16px; z-index:50; overflow:auto;}
   .modalbg.open{ display:flex; }
   .modal{ background:#fff; border-radius:6px; max-width:760px; width:100%; padding:20px 22px; }
@@ -90,6 +89,7 @@
   #login-screen .box{ background:var(--panel); border:1px solid var(--line-strong); border-radius:6px; padding:28px 30px; width:320px; }
   #app-screen{ display:none; }
   .chip{ display:inline-block; background:var(--slate-dim); border-radius:3px; padding:2px 6px; margin:2px 3px 0 0; font-family:'IBM Plex Mono'; font-size:10px; }
+  .detail-box{ background:#FAFBFA; border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -107,7 +107,7 @@
 
 <div id="app-screen">
 <header class="top">
-  <div><h1>Cost Subledger</h1><div class="tag">Shipment-level allocation · full approval workflow</div></div>
+  <div><h1>Cost Subledger</h1><div class="tag">Shipment-level allocation · single-step review (approval chain paused)</div></div>
   <div class="right">
     <span class="who" id="who-label"></span>
     <button class="btn secondary btn-sm" id="btn-logout">Sign out</button>
@@ -120,8 +120,9 @@
   <button data-tab="charges">Charge Codes</button>
   <button data-tab="inv-other">Invoices — Other Headers</button>
   <button data-tab="inv-lm">Invoices — Last Mile</button>
-  <button data-tab="queue">Approval Queue</button>
+  <button data-tab="queue">Review Queue</button>
   <button data-tab="disputes">Disputes</button>
+  <button data-tab="shiplookup">Shipment Lookup</button>
   <button data-tab="aging">Aging &amp; Write-back</button>
   <button data-tab="reports">P&amp;L / Accounting</button>
   <button data-tab="admin">Access &amp; Thresholds</button>
@@ -134,7 +135,7 @@
   <div class="grid2">
     <div class="panel">
       <h2>Shipment-level provisional cost</h2>
-      <p class="desc">One row per shipment: LOB, MAWB, gross weight, revenue, and a column per cost header. Because your export's column names vary (and some repeat), you'll map columns to fields after upload rather than relying on auto-detection alone.</p>
+      <p class="desc">One row per shipment: LOB, MAWB, gross weight, revenue, and a column per cost header. You'll pick the real header row and map columns after upload, since exports vary and some columns repeat.</p>
       <input type="file" id="file-ship" accept=".csv,.xlsx,.xls">
       <div id="ship-status" class="small" style="margin-top:6px;"></div>
     </div>
@@ -151,7 +152,7 @@
 <section class="tabpanel" id="tab-charges">
   <div class="panel">
     <h2>Charge Code Master</h2>
-    <p class="desc">Grows automatically as invoice line items get entered. Not used for matching outside Last Mile yet — captured now so charge-code-level costing is possible later without re-keying history.</p>
+    <p class="desc">Grows automatically as invoice line items get entered. Not used for matching outside Last Mile yet.</p>
     <div class="tablewrap"><table class="data" id="charge-table"><thead><tr><th>Charge Code</th><th>Cost Header</th><th>Vendor</th><th>Reimbursable (default)</th></tr></thead><tbody></tbody></table></div>
   </div>
 </section>
@@ -160,7 +161,7 @@
 <section class="tabpanel" id="tab-inv-other">
   <div class="panel">
     <h2>New invoice — Pickup / FM / Hub / OC / MM / DC / etc.</h2>
-    <p class="desc">Tags to a group (MAWB, Node+Period, or a single shipment) and a cost header. The system compares the invoice against the sum of provisional cost across every shipment in that group.</p>
+    <p class="desc">Tags to a group (MAWB, Node+Period, or a single shipment) and a cost header. Group type locks to whichever grain that header actually uses — you can't mismatch them.</p>
     <div class="grid2">
       <div>
         <label class="field">Vendor code / name</label><input type="text" id="oi-vendor" placeholder="e.g. FREIGHTWINGS">
@@ -174,8 +175,8 @@
         <label class="field">Backup document (optional)</label><input type="file" id="oi-backup">
         <label class="field">Cost header</label>
         <select id="oi-header"></select>
-        <label class="field">Group type</label>
-        <select id="oi-grouptype">
+        <label class="field">Group type <span class="small">(set automatically by the header above)</span></label>
+        <select id="oi-grouptype" disabled>
           <option value="MAWB">MAWB</option>
           <option value="NODE_PERIOD">Node + Period</option>
           <option value="SHIPMENT">Single Shipment</option>
@@ -185,6 +186,11 @@
         <label class="field">Entered split amount for this header (optional — blank = compare against summed group total)</label>
         <input type="number" id="oi-entered-amount">
       </div>
+    </div>
+    <div id="oi-preview"></div>
+    <div id="oi-dispute-draft-wrap" style="display:none;">
+      <label class="field">Auto-drafted dispute text (edit freely — only used if you flag for dispute)</label>
+      <textarea id="oi-dispute-draft"></textarea>
     </div>
     <div class="row-actions"><button class="btn teal" id="btn-create-other-invoice">Create &amp; tag invoice</button></div>
     <div id="oi-status" class="small" style="margin-top:6px;"></div>
@@ -217,10 +223,10 @@
   </div>
 </section>
 
-<!-- ===================== APPROVAL QUEUE ===================== -->
+<!-- ===================== REVIEW QUEUE ===================== -->
 <section class="tabpanel" id="tab-queue">
   <div class="panel">
-    <p class="desc">Shows invoices where the current approval level matches your role. Approve, reject, send back, reassign, or edit tagging (with a mandatory reason).</p>
+    <p class="desc">Every invoice awaiting a decision, across both flows. Accept books the actual and reverses provision; Flag for dispute holds it open with a dispute record — nothing here routes through multiple approval levels right now, that's intentionally paused.</p>
     <div id="queue-list"><div class="emptystate">Loading…</div></div>
   </div>
 </section>
@@ -228,9 +234,22 @@
 <!-- ===================== DISPUTES ===================== -->
 <section class="tabpanel" id="tab-disputes">
   <div class="panel">
-    <h2>Raise / resolve a dispute</h2>
-    <p class="desc">The original invoice amount never changes — a dispute resolved as Agreed or Settled requires a Credit Note for the differential, entered separately.</p>
+    <h2>Open &amp; resolved disputes</h2>
+    <p class="desc">The original invoice amount never changes — Agreed/Settled requires a Credit Note for the differential, entered separately.</p>
     <div id="dispute-list"><div class="emptystate">Loading…</div></div>
+  </div>
+</section>
+
+<!-- ===================== SHIPMENT LOOKUP ===================== -->
+<section class="tabpanel" id="tab-shiplookup">
+  <div class="panel">
+    <h2>Shipment lookup</h2>
+    <p class="desc">Leg-wise provisional vs. actual for one shipment, with the invoice each leg is knocked off against.</p>
+    <div class="toolbar">
+      <input type="text" id="sl-search" placeholder="Shipment ID" style="max-width:260px;">
+      <button class="btn teal btn-sm" id="btn-sl-search">Look up</button>
+    </div>
+    <div id="sl-result"></div>
   </div>
 </section>
 
@@ -238,7 +257,7 @@
 <section class="tabpanel" id="tab-aging">
   <div class="panel">
     <h2>Open provisions, with aging</h2>
-    <p class="desc">Aging runs from pickup date (shipment), the oldest shipment's pickup date (MAWB), or the configured period (node/fixed pool). Select rows to write back — this removes the open liability from this view without changing the shipment's own cost record.</p>
+    <p class="desc">Aging runs from pickup date (shipment), the oldest shipment's pickup date (MAWB), or the configured period. Select rows to write back — this removes the open liability without changing the shipment's own cost record.</p>
     <label class="field">As of date</label><input type="date" id="aging-asof" style="max-width:200px;">
     <button class="btn secondary btn-sm" id="btn-run-aging" style="margin-top:6px;">Run aging report</button>
     <div class="tablewrap"><table class="data" id="aging-table"><thead><tr><th><input type="checkbox" id="aging-select-all"></th><th>Shipment</th><th>Header</th><th class="num">Provisional</th><th class="num">Days open</th></tr></thead><tbody></tbody></table></div>
@@ -252,7 +271,11 @@
 <!-- ===================== REPORTS ===================== -->
 <section class="tabpanel" id="tab-reports">
   <div id="pnl-strip"></div>
-  <div class="panel"><h2>P&amp;L by LOB</h2>
+  <div class="panel"><h2>By cost header (leg-wise)</h2>
+    <p class="desc">Provisional vs. actual, aggregated across every shipment, by leg — not one blended number.</p>
+    <div class="tablewrap" style="max-height:320px;"><table class="data" id="pnl-header-table"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th class="num">Variance</th><th>Coverage</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="panel" style="margin-top:12px;"><h2>P&amp;L by LOB</h2>
     <div class="tablewrap" style="max-height:260px;"><table class="data" id="pnl-lob-table"><thead><tr><th>LOB</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Contribution</th><th class="num">Margin %</th></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="panel" style="margin-top:12px;"><h2>Shipment detail</h2>
@@ -267,8 +290,8 @@
   <div class="grid2">
     <div class="panel">
       <h2>Users &amp; roles</h2>
-      <p class="desc">Users are created in the Supabase dashboard (Authentication → Users). Assign their role and, for LOB Owners, which LOB here.</p>
-      <div class="tablewrap"><table class="data" id="users-table"><thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>LOB</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p class="desc">Users are created in the Supabase dashboard (Authentication → Users). Role/LOB assignment currently informational — routing by role is paused along with the approval chain.</p>
+      <div class="tablewrap"><table class="data" id="users-table"><thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>LOB</th></tr></thead><tbody></tbody></table></div>
       <div class="row-actions">
         <input type="text" id="new-user-id" placeholder="user_id (from Supabase Auth)" style="max-width:220px;">
         <input type="text" id="new-user-name" placeholder="Full name" style="max-width:160px;">
@@ -286,8 +309,8 @@
     </div>
     <div class="panel">
       <h2>Approval thresholds by LOB × Cost Header</h2>
-      <p class="desc">Escalation is AND-gated: both the % AND the value must be breached to move up a level.</p>
-      <div class="tablewrap" style="max-height:400px;"><table class="data" id="threshold-table"><thead><tr><th>LOB</th><th>Header</th><th class="num">FH %</th><th class="num">FH ₹</th><th class="num">CEO %</th><th class="num">CEO ₹</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p class="desc">Stored for when the tiered chain is re-enabled — not currently used for routing.</p>
+      <div class="tablewrap" style="max-height:400px;"><table class="data" id="threshold-table"><thead><tr><th>LOB</th><th>Header</th><th class="num">FH %</th><th class="num">FH ₹</th><th class="num">CEO %</th><th class="num">CEO ₹</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </section>
@@ -295,23 +318,10 @@
 </main>
 </div>
 
-<div class="modalbg" id="tagedit-modal">
-  <div class="modal">
-    <button class="closebtn" id="tagedit-close">&times;</button>
-    <h3 style="margin-top:0;">Edit tagging</h3>
-    <label class="field">Cost header</label><select id="te-header"></select>
-    <label class="field">Group type</label>
-    <select id="te-grouptype"><option value="MAWB">MAWB</option><option value="NODE_PERIOD">Node + Period</option><option value="SHIPMENT">Shipment</option></select>
-    <label class="field">Group key</label><input type="text" id="te-groupkey">
-    <label class="field">Reason for change (mandatory)</label><textarea id="te-reason"></textarea>
-    <div class="row-actions"><button class="btn teal" id="te-save">Save edit</button></div>
-  </div>
-</div>
-
 <div class="modalbg" id="headerrow-modal">
   <div class="modal">
     <h3 style="margin-top:0;">Which row is the real header?</h3>
-    <p class="small">Some exports have a title or blank rows before the actual column headers — pick the right one below. We've pre-selected our best guess; just confirm or pick a different row.</p>
+    <p class="small">Some exports have a title or blank rows before the actual column headers — pick the right one below.</p>
     <div class="tablewrap" style="max-height:320px;"><table class="data" id="headerrow-table"><tbody></tbody></table></div>
     <div class="row-actions"><button class="btn teal" id="headerrow-confirm">Use this row as the header</button></div>
   </div>
@@ -321,7 +331,7 @@
   <div class="modal">
     <button class="closebtn" id="colmap-close">&times;</button>
     <h3 style="margin-top:0;">Map columns</h3>
-    <p class="small">Your file's columns, left. Assign each to a system field, right. Repeated or oddly-named source columns are exactly why this step exists — pick by content, not by name.</p>
+    <p class="small">Your file's columns, left. Assign each to a system field, right. Repeated or oddly-named source columns are exactly why this step exists.</p>
     <div class="tablewrap" style="max-height:420px;"><table class="data" id="colmap-table"><thead><tr><th>Source column (sample value)</th><th>Maps to</th></tr></thead><tbody></tbody></table></div>
     <div class="row-actions"><button class="btn teal" id="colmap-confirm">Confirm mapping &amp; import</button></div>
   </div>
@@ -339,7 +349,6 @@ const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Custo
 const HEADER_GRAIN = {PICKUP:'NODE_PERIOD',FM:'NODE_PERIOD',HUB:'NODE_PERIOD',OC:'MAWB',MM:'MAWB',DC:'MAWB',
   DESTCLEAR:'MAWB',IOR:'MAWB',OCEAN:'MAWB',TRANSSHIP:'MAWB',LM_PICKUP:'SHIPMENT',LM:'SHIPMENT',
   AGGREGATION:'SHIPMENT',INDIA_UK_MM:'MAWB'};
-const APPROVAL_CHAIN = ['LOB_OWNER','FINANCE_HEAD','CEO'];
 const LM_COL_TO_CODE = {
   'base cost':'LM_BASE','fuel surcharge':'LM_FUEL','residentital surcharge ups':'LM_RES','residential surcharge':'LM_RES',
   'das charges ups / fedex':'LM_DAS','addl wight handle charges':'LM_ADDLWT',
@@ -353,51 +362,39 @@ function normHeader(h){ return String(h||'').trim().toLowerCase(); }
 function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.floor((new Date(b) - new Date(a)) / 86400000); }
+function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
 
-// Returns raw rows (array-of-arrays) — no header assumption. Header row is
-// picked interactively (with a best-guess default), since real exports vary:
-// some have the header on row 1, some have title/metadata rows above it.
+/* ============================= FILE PARSING ============================= */
 function parseRawRows(file){
   return new Promise((resolve, reject)=>{
     const ext = file.name.split('.').pop().toLowerCase();
-    if(ext==='csv'){
-      Papa.parse(file,{skipEmptyLines:false, complete:res=>resolve(res.data), error:reject});
-    } else if(ext==='xlsx'||ext==='xls'){
+    if(ext==='csv'){ Papa.parse(file,{skipEmptyLines:false, complete:res=>resolve(res.data), error:reject}); }
+    else if(ext==='xlsx'||ext==='xls'){
       const reader = new FileReader();
       reader.onload = e=>{ try{
           const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array', cellDates:true});
           const sheet=wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
-          resolve(rows);
+          resolve(XLSX.utils.sheet_to_json(sheet, {defval:'', header:1}));
         }catch(err){reject(err);} };
       reader.onerror = reject; reader.readAsArrayBuffer(file);
     } else reject(new Error('Unsupported file type: '+ext));
   });
 }
-// Handles: JS Date (from cellDates:true), a leftover Excel serial number
-// (older files / edge cases), or an already-formatted date string.
 function toISODate(val){
   if(val===''||val==null) return null;
   if(val instanceof Date && !isNaN(val)) return val.toISOString().slice(0,10);
-  if(typeof val === 'number'){
-    const d = new Date(Math.round((val - 25569) * 86400 * 1000)); // Excel serial → JS Date
-    if(!isNaN(d)) return d.toISOString().slice(0,10);
-  }
-  const parsed = new Date(val);
-  if(!isNaN(parsed)) return parsed.toISOString().slice(0,10);
-  return null; // couldn't parse — better to leave null than send garbage to a date column
+  if(typeof val === 'number'){ const d = new Date(Math.round((val - 25569) * 86400 * 1000)); if(!isNaN(d)) return d.toISOString().slice(0,10); }
+  const parsed = new Date(val); if(!isNaN(parsed)) return parsed.toISOString().slice(0,10);
+  return null;
 }
 function guessHeaderRowIndex(rawRows){
   for(let i=0; i<Math.min(rawRows.length, 15); i++){
     const row = rawRows[i] || [];
-    const nonEmptyText = row.filter(c => c!=='' && c!=null && isNaN(Number(c))).length;
-    if(nonEmptyText >= 3) return i; // first row that looks like labels, not data or blank
+    if(row.filter(c => c!=='' && c!=null && isNaN(Number(c))).length >= 3) return i;
   }
   return 0;
 }
-// Shows a row-picker (pre-selected to the best guess) so the person confirms
-// rather than the app silently assuming row 1 is always the header.
-function pickHeaderRowThenParse(file){
+function pickHeaderRowThenParsePositional(file){
   return new Promise(async (resolve, reject)=>{
     let rawRows;
     try{ rawRows = await parseRawRows(file); } catch(err){ reject(err); return; }
@@ -415,16 +412,29 @@ function pickHeaderRowThenParse(file){
       const picked = parseInt(document.querySelector('input[name="hr-pick"]:checked').value, 10);
       const headers = rawRows[picked].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
       const dataRows = rawRows.slice(picked+1).filter(r => r.some(c => c!=='' && c!=null));
-      const objRows = dataRows.map(r=>{ const o={}; headers.forEach((h,i)=>o[h]=r[i]); return o; });
       modal.classList.remove('open');
-      resolve({rows:objRows, headers});
+      resolve({rows:dataRows, headers});
     };
   });
 }
-// Back-compat wrapper for call sites that don't need the header-row picker
-// (kept simple on purpose — CSV files without a title block, mainly).
-function parseTabularFile(file){ return pickHeaderRowThenParse(file); }
-
+function parseTabularFile(file){
+  return new Promise((resolve, reject)=>{
+    const ext = file.name.split('.').pop().toLowerCase();
+    if(ext==='csv'){ Papa.parse(file,{header:true, skipEmptyLines:true, complete:res=>resolve({rows:res.data, headers:res.meta.fields}), error:reject}); }
+    else if(ext==='xlsx'||ext==='xls'){
+      const reader = new FileReader();
+      reader.onload = e=>{ try{
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array', cellDates:true});
+          const sheet=wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, {defval:'', header:1});
+          const headers = rows[0].map((h,i)=> h===''||h==null ? `Column_${i+1}` : String(h));
+          const objRows = rows.slice(1).map(r=>{ const o={}; headers.forEach((h,i)=>o[h]=r[i]); return o; });
+          resolve({rows:objRows, headers});
+        }catch(err){reject(err);} };
+      reader.onerror = reject; reader.readAsArrayBuffer(file);
+    } else reject(new Error('Unsupported file type: '+ext));
+  });
+}
 async function uploadDoc(file, folder){
   if(!file) return null;
   const path = `${folder}/${Date.now()}_${file.name}`;
@@ -456,18 +466,16 @@ async function onLoggedIn(session){
   await loadChargeCodes();
   await loadOtherInvoices();
   await loadLMInvoiceGroups();
-  await loadQueue();
+  await loadReviewQueue();
   await loadDisputes();
   await loadUsersAndThresholds();
 }
 (async function initAuth(){ const { data } = await sbClient.auth.getSession(); if(data.session) await onLoggedIn(data.session); })();
 
-/* ============================= COST HEADER OPTIONS ============================= */
 async function loadCostHeaderOptions(){
   const { data } = await sbClient.from('cost_headers').select('*').order('code');
-  const opts = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
-  document.getElementById('oi-header').innerHTML = opts;
-  document.getElementById('te-header').innerHTML = opts;
+  document.getElementById('oi-header').innerHTML = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
+  if(data && data.length) document.getElementById('oi-grouptype').value = HEADER_GRAIN[data[0].code];
 }
 
 /* ============================= SHIPMENT UPLOAD WITH COLUMN MAPPING ============================= */
@@ -491,48 +499,43 @@ const FIELD_GUESS = {
   'lm pickup cost':'H:LM_PICKUP','lm cost':'H:LM','aggreation cost':'H:AGGREGATION','aggregation cost':'H:AGGREGATION',
   'india to uk mm':'H:INDIA_UK_MM'
 };
-let pendingShipFile = null, pendingShipParsed = null, pendingShipMapping = {};
+let pendingShipParsed = null, pendingShipMapping = {};
 
 document.getElementById('file-ship').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
-  pendingShipFile = file;
   document.getElementById('ship-status').textContent = 'Parsing…';
-  try{
-    pendingShipParsed = await parseTabularFile(file);
-    openColumnMapModal();
-  }catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
+  try{ pendingShipParsed = await pickHeaderRowThenParsePositional(file); openColumnMapModal(); }
+  catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
 });
 function guessFieldForColumn(header){
   const h = normHeader(header);
-  if(FIELD_GUESS[h]) return FIELD_GUESS[h]; // exact match first
-  for(const key in FIELD_GUESS){ if(h.includes(key) || key.includes(h)) return FIELD_GUESS[key]; } // then substring, either direction
+  if(FIELD_GUESS[h]) return FIELD_GUESS[h];
+  for(const key in FIELD_GUESS){ if(h.includes(key) || key.includes(h)) return FIELD_GUESS[key]; }
   return 'IGNORE';
 }
 function openColumnMapModal(){
   const tb = document.querySelector('#colmap-table tbody'); tb.innerHTML='';
-  const sampleRow = pendingShipParsed.rows[0] || {};
+  const sampleRow = pendingShipParsed.rows[0] || [];
   let unguessedCount = 0;
   pendingShipParsed.headers.forEach((h, idx)=>{
-    const guessKey = guessFieldForColumn(h);
+    const isDup = pendingShipParsed.headers.filter(x=>x===h).length > 1;
+    const guessKey = isDup ? 'IGNORE' : guessFieldForColumn(h);
     if(guessKey==='IGNORE') unguessedCount++;
     const tr = document.createElement('tr');
-    tr.className = guessKey==='IGNORE' ? 'needs-attention' : '';
-    tr.innerHTML = `<td><b>${h}</b><br><span class="small">${String(sampleRow[h]).slice(0,40)}</span></td>
-      <td><select data-col="${h}" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select>
-      ${guessKey!=='IGNORE' ? '<span class="small" style="color:var(--teal);"> ✓ guessed — confirm or change</span>' : '<span class="small" style="color:var(--amber);"> needs your call</span>'}</td>`;
+    tr.innerHTML = `<td><b>${h}</b>${isDup?' <span class="small" style="color:var(--red);">(repeated name — col '+(idx+1)+')</span>':''}<br><span class="small">${String(sampleRow[idx]).slice(0,40)}</span></td>
+      <td><select data-col-idx="${idx}" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select></td>`;
     tb.appendChild(tr);
   });
-  document.querySelector('#colmap-modal .desc, #colmap-modal p.small')?.remove();
+  document.querySelectorAll('#colmap-modal p.small').forEach(p=>p.remove());
   const p = document.createElement('p'); p.className='small';
-  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed — teal borders are pre-filled, just confirm; amber ones genuinely need your judgment.`;
+  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed. Teal = confirm, amber = your call.`;
   document.querySelector('#colmap-modal h3').after(p);
   document.getElementById('colmap-modal').classList.add('open');
 }
 document.getElementById('colmap-close').addEventListener('click', ()=> document.getElementById('colmap-modal').classList.remove('open'));
 document.getElementById('colmap-confirm').addEventListener('click', async ()=>{
-  const selects = document.querySelectorAll('#colmap-table select');
   pendingShipMapping = {};
-  selects.forEach(s=>{ pendingShipMapping[s.dataset.col] = s.value; });
+  document.querySelectorAll('#colmap-table select').forEach(s=>{ pendingShipMapping[s.dataset.colIdx] = s.value; });
   document.getElementById('colmap-modal').classList.remove('open');
   await importShipmentsWithMapping();
 });
@@ -543,9 +546,8 @@ async function importShipmentsWithMapping(){
   rows.forEach(row=>{
     let shipmentId=null, lob=null, node=null, pickupDate=null, mawb=null, grossWeight=null, revenue=null, revCcy='INR';
     const costs = {};
-    for(const col in pendingShipMapping){
-      const field = pendingShipMapping[col];
-      const val = row[col];
+    for(const idxStr in pendingShipMapping){
+      const idx = parseInt(idxStr, 10); const field = pendingShipMapping[idxStr]; const val = row[idx];
       if(field==='IGNORE') continue;
       if(field==='shipment_id') shipmentId = val ? String(val).trim() : null;
       else if(field==='lob') lob = val ? String(val).trim() : null;
@@ -564,20 +566,30 @@ async function importShipmentsWithMapping(){
     Object.entries(costs).forEach(([code,amt])=> costMap.set(`${shipmentId}|${code}`, {shipment_id:shipmentId, cost_header:code, provisional_amount:amt}));
   });
   const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()];
-  document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…` + (dupCount?` (${dupCount} duplicate shipment IDs in file — kept last occurrence)`:'');
+  document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…` + (dupCount?` (${dupCount} duplicate IDs — kept last)`:'');
+  let savedShip = 0, failedShipChunks = 0;
   for(const chunk of chunkArray(shipmentRows,500)){
     const { error } = await sbClient.from('shipments').upsert(chunk, {onConflict:'shipment_id'});
-    if(error){ document.getElementById('ship-status').textContent = 'Save failed: '+error.message; return; }
+    if(error){ failedShipChunks++; console.error('Shipment chunk failed:', error.message, chunk[0]); continue; }
+    savedShip += chunk.length;
   }
-  for(const chunk of chunkArray(costRows,500)){
-    const { error } = await sbClient.from('shipment_costs').upsert(
-      chunk.map(c=>({...c, status:'OPEN'})), {onConflict:'shipment_id,cost_header', ignoreDuplicates:false});
-    if(error){ document.getElementById('ship-status').textContent = 'Cost save failed: '+error.message; return; }
+  const { data: protectedRows } = await sbClient.from('shipment_costs').select('shipment_id, cost_header').neq('status','OPEN');
+  const protectedSet = new Set((protectedRows||[]).map(r=>`${r.shipment_id}|${r.cost_header}`));
+  const safeCostRows = costRows.filter(c => !protectedSet.has(`${c.shipment_id}|${c.cost_header}`));
+  const skippedCostRows = costRows.length - safeCostRows.length;
+  let savedCost = 0, failedCostChunks = 0;
+  for(const chunk of chunkArray(safeCostRows,500)){
+    const { error } = await sbClient.from('shipment_costs').upsert(chunk.map(c=>({...c, status:'OPEN'})), {onConflict:'shipment_id,cost_header', ignoreDuplicates:false});
+    if(error){ failedCostChunks++; console.error('Cost chunk failed:', error.message, chunk[0]); continue; }
+    savedCost += chunk.length;
   }
-  document.getElementById('ship-status').textContent = `${shipmentRows.length} shipments, ${costRows.length} cost lines saved.`;
+  document.getElementById('ship-status').textContent =
+    `${savedShip} of ${shipmentRows.length} shipments saved, ${savedCost} of ${costRows.length - skippedCostRows} eligible cost lines saved.` +
+    (skippedCostRows ? ` ${skippedCostRows} skipped — already locked/reversed.` : '') +
+    (failedShipChunks || failedCostChunks ? ` ${failedShipChunks+failedCostChunks} batch(es) failed — check console.` : '');
 }
 
-/* ============================= LM BOX UPLOAD (unchanged mechanism) ============================= */
+/* ============================= LM BOX UPLOAD ============================= */
 document.getElementById('file-boxlm').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   document.getElementById('boxlm-status').textContent = 'Parsing…';
@@ -605,17 +617,95 @@ async function loadChargeCodes(){
   const { data } = await sbClient.from('charge_code_master').select('*').order('charge_code');
   const tb = document.querySelector('#charge-table tbody'); tb.innerHTML='';
   (data||[]).forEach(c=>{ tb.innerHTML += `<tr><td class="mono">${c.charge_code}</td><td>${HEADER_LABEL[c.cost_header]||c.cost_header||''}</td><td>${c.vendor_code||''}</td><td>${c.reimbursable_default?'Yes':'No'}</td></tr>`; });
-  if(!data || !data.length) tb.innerHTML = '<tr><td colspan="4" class="small">None yet — created automatically as invoice lines are entered.</td></tr>';
+  if(!data || !data.length) tb.innerHTML = '<tr><td colspan="4" class="small">None yet.</td></tr>';
 }
-async function ensureChargeCode(code, header, vendor){
-  if(!code) return;
-  await sbClient.from('charge_code_master').upsert({charge_code:code, cost_header:header, vendor_code:vendor}, {onConflict:'charge_code', ignoreDuplicates:true});
+async function ensureVendor(code){ if(!code) return; await sbClient.from('vendors').upsert({code, name:code}, {onConflict:'code', ignoreDuplicates:true}); }
+
+/* ============================= GROUP PROVISIONAL SUM (shared) ============================= */
+async function getGroupProvisionalSum(header, groupType, groupKey){
+  let shipmentIds = [];
+  async function summarize(shipRows){
+    const ids = (shipRows||[]).map(s=>s.shipment_id);
+    if(!ids.length) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
+    let sum = 0; const weights = {};
+    for(const chunk of chunkArray(ids,200)){
+      const {data} = await sbClient.from('shipment_costs').select('shipment_id, provisional_amount').eq('cost_header', header).in('shipment_id', chunk);
+      (data||[]).forEach(r=> sum += (r.provisional_amount||0));
+    }
+    (shipRows||[]).forEach(r=> weights[r.shipment_id] = r.gross_weight||0);
+    const totalWeight = (shipRows||[]).reduce((s,r)=> s+(r.gross_weight||0), 0);
+    return {sum, shipmentIds: ids, weights, totalWeight};
+  }
+  if(groupType==='SHIPMENT'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('shipment_id', groupKey); return summarize(data); }
+  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('mawb', groupKey); return summarize(data); }
+  else if(groupType==='NODE_PERIOD'){ const [node, period] = groupKey.split('|'); const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('node', node).gte('pickup_date', period+'-01').lt('pickup_date', period+'-32'); return summarize(data); }
+  return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
 }
 
-/* ============================= VENDOR (lightweight, grows on the go) ============================= */
-async function ensureVendor(code){
-  if(!code) return;
-  await sbClient.from('vendors').upsert({code, name:code}, {onConflict:'code', ignoreDuplicates:true});
+/* ============================= LIVE PREVIEW ON INVOICE FORM ============================= */
+document.getElementById('oi-header').addEventListener('change', ()=>{
+  document.getElementById('oi-grouptype').value = HEADER_GRAIN[document.getElementById('oi-header').value];
+  refreshInvoicePreview();
+});
+['oi-groupkey','oi-amount'].forEach(id=> document.getElementById(id).addEventListener('input', debounce(refreshInvoicePreview, 500)));
+
+function draftDisputeText(headerLabel, groupType, groupKey, totalW, shipCount, provSum, actual){
+  return `Provisional ${headerLabel} cost for ${groupType} ${groupKey} was based on ${fmt(totalW)} kg across ${shipCount} shipment(s), totalling ${fmt(provSum)}. The invoice states ${fmt(actual)} — a difference of ${fmt(actual-provSum)}. Please confirm before this variance is accepted.`;
+}
+async function refreshInvoicePreview(){
+  const header = document.getElementById('oi-header').value;
+  const groupType = document.getElementById('oi-grouptype').value;
+  const groupKey = document.getElementById('oi-groupkey').value.trim();
+  const amount = num(document.getElementById('oi-amount').value);
+  const box = document.getElementById('oi-preview');
+  const draftWrap = document.getElementById('oi-dispute-draft-wrap');
+  if(!header || !groupKey){ box.innerHTML=''; draftWrap.style.display='none'; return; }
+  box.innerHTML = '<div class="small">Checking against provisional cost…</div>';
+  const summary = await getGroupProvisionalSum(header, groupType, groupKey);
+  if(!summary.shipmentIds.length){ box.innerHTML = `<div class="note warn">No shipments found for ${groupType} = "${groupKey}". Check the group key before submitting.</div>`; draftWrap.style.display='none'; return; }
+  const totalW = summary.totalWeight;
+  let html = `<div class="ledgerstrip">
+    <div class="cell"><div class="lab">Shipments in group</div><div class="val">${summary.shipmentIds.length}</div></div>
+    <div class="cell"><div class="lab">Total weight</div><div class="val">${fmt(totalW)} kg</div></div>
+    <div class="cell"><div class="lab">Provisional total</div><div class="val">${fmt(summary.sum)}</div></div>`;
+  if(!isNaN(amount)){
+    const variance = amount - summary.sum;
+    const pct = summary.sum!==0 ? (variance/summary.sum*100) : (amount!==0?100:0);
+    const perKgProv = totalW>0? summary.sum/totalW : null, perKgAct = totalW>0? amount/totalW : null;
+    html += `<div class="cell"><div class="lab">Variance</div><div class="val ${variance>0?'neg':(variance<0?'pos':'')}">${fmt(variance)} (${pct.toFixed(2)}%)</div></div>`;
+    if(perKgProv!=null) html += `<div class="cell"><div class="lab">Per-kg change</div><div class="val">${fmt(perKgAct-perKgProv)}/kg</div></div>`;
+    if(Math.abs(variance) > 2){
+      draftWrap.style.display='block';
+      document.getElementById('oi-dispute-draft').value = draftDisputeText(HEADER_LABEL[header]||header, groupType, groupKey, totalW, summary.shipmentIds.length, summary.sum, amount);
+    } else draftWrap.style.display='none';
+  } else draftWrap.style.display='none';
+  html += `</div>`;
+  box.innerHTML = html;
+}
+
+/* ============================= INVOICE SUMMARY (shared: preview, list, detail) ============================= */
+async function computeInvoiceSummary(invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
+  const tagSummaries = [];
+  for(const tag of tags||[]){
+    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+    const variance = actual - summary.sum;
+    const pct = summary.sum!==0 ? (variance/summary.sum*100) : (actual!==0?100:0);
+    tagSummaries.push({tag, summary, actual, variance, pct, totalW: summary.totalWeight});
+  }
+  const allIds = [...new Set(tagSummaries.flatMap(t=>t.summary.shipmentIds))];
+  const lobMap = {};
+  for(const chunk of chunkArray(allIds,200)){
+    const {data} = await sbClient.from('shipments').select('shipment_id, lob').in('shipment_id', chunk);
+    (data||[]).forEach(s=>{ if(s.lob) lobMap[s.shipment_id]=s.lob; });
+  }
+  const lobsInvolved = new Set(allIds.map(id=>lobMap[id]).filter(Boolean));
+  return {inv, tagSummaries, isMultiLob: lobsInvolved.size>1, lobs:[...lobsInvolved]};
+}
+async function logAction(invoiceId, action, actor, reason){
+  await sbClient.from('approval_actions').insert({invoice_id:invoiceId, action, actor, reason});
 }
 
 /* ============================= OTHER-HEADER INVOICES ============================= */
@@ -636,22 +726,19 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   if(!vendor || isNaN(amount) || !sourceFile || !groupKey){ statusEl.textContent = 'Vendor, taxable amount, source document, and group key are all required.'; return; }
   statusEl.textContent = 'Checking for duplicate invoice number…';
   await ensureVendor(vendor);
-
-  // duplicate vendor+invoice_number check — never blocks, flags for review
   let duplicateOf = null;
   if(invnum){
     const { data: dupes } = await sbClient.from('invoices').select('id').eq('vendor_code', vendor).eq('invoice_number', invnum);
     if(dupes && dupes.length) duplicateOf = dupes[0].id;
   }
-
   statusEl.textContent = 'Uploading source document…';
   const sourcePath = await uploadDoc(sourceFile, 'other-header');
   const backupPath = backupFile ? await uploadDoc(backupFile, 'other-header') : null;
-  if(!sourcePath){ statusEl.textContent = 'Source document upload failed — check the invoice-documents storage bucket exists.'; return; }
+  if(!sourcePath){ statusEl.textContent = 'Source document upload failed — check the invoice-documents storage bucket exists and has a policy for authenticated users.'; return; }
 
   const { data: invRow, error: invErr } = await sbClient.from('invoices').insert({
     vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency, taxable_amount:amount,
-    source_file_path:sourcePath, backup_file_path:backupPath, status:'DRAFT', entered_by: CURRENT_USER.id,
+    source_file_path:sourcePath, backup_file_path:backupPath, status:'PENDING_REVIEW', entered_by: CURRENT_USER.id,
     duplicate_of_invoice_id: duplicateOf
   }).select().single();
   if(invErr){ statusEl.textContent = 'Could not create invoice: '+invErr.message; return; }
@@ -661,92 +748,106 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
     entered_amount: enteredAmt, status:'LOCKED', tagged_by: CURRENT_USER.id
   });
   await lockGroupCosts(header, groupType, groupKey, invRow.id);
-  await routeInvoiceForApproval(invRow.id);
-  await logAction(invRow.id, 'ENTERED', null, CURRENT_USER.id, null);
+  await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, null);
 
-  statusEl.textContent = `Invoice #${invRow.id} created and tagged. ` + (duplicateOf ? `NOTE: vendor+invoice number matches invoice #${duplicateOf} — flagged for review.` : '') + ' Sent for approval.';
-  document.getElementById('oi-vendor').value=''; document.getElementById('oi-invnum').value=''; document.getElementById('oi-amount').value='';
-  document.getElementById('oi-groupkey').value=''; document.getElementById('oi-entered-amount').value='';
-  await loadOtherInvoices(); await loadQueue();
+  statusEl.textContent = `Invoice #${invRow.id} created and tagged.` + (duplicateOf ? ` NOTE: vendor+invoice number matches invoice #${duplicateOf} — flagged for review.` : '') + ' Awaiting review.';
+  ['oi-vendor','oi-invnum','oi-amount','oi-groupkey','oi-entered-amount'].forEach(id=> document.getElementById(id).value='');
+  document.getElementById('oi-preview').innerHTML=''; document.getElementById('oi-dispute-draft-wrap').style.display='none';
+  await loadOtherInvoices(); await loadReviewQueue();
 });
 
 async function lockGroupCosts(header, groupType, groupKey, invoiceId){
-  let shipmentIds = [];
-  if(groupType==='SHIPMENT') shipmentIds = [groupKey];
-  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id').eq('mawb', groupKey); shipmentIds = (data||[]).map(s=>s.shipment_id); }
-  else if(groupType==='NODE_PERIOD'){ const [node, period] = groupKey.split('|'); const {data} = await sbClient.from('shipments').select('shipment_id').eq('node', node).gte('pickup_date', period+'-01').lt('pickup_date', period+'-32'); shipmentIds = (data||[]).map(s=>s.shipment_id); }
-  if(!shipmentIds.length) return;
-  for(const chunk of chunkArray(shipmentIds, 200)){
+  const summary = await getGroupProvisionalSum(header, groupType, groupKey);
+  for(const chunk of chunkArray(summary.shipmentIds, 200)){
     await sbClient.from('shipment_costs').update({status:'LOCKED', locked_by_invoice_id: invoiceId}).eq('cost_header', header).in('shipment_id', chunk).eq('status','OPEN');
   }
-}
-
-async function getGroupProvisionalSum(header, groupType, groupKey){
-  let shipmentIds = [];
-  if(groupType==='SHIPMENT') shipmentIds = [groupKey];
-  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('mawb', groupKey); return summarize(data, header); }
-  else if(groupType==='NODE_PERIOD'){ const [node, period] = groupKey.split('|'); const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('node', node).gte('pickup_date', period+'-01').lt('pickup_date', period+'-32'); return summarize(data, header); }
-  const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').in('shipment_id', shipmentIds);
-  return summarize(data, header);
-
-  async function summarize(shipRows, header){
-    const ids = (shipRows||[]).map(s=>s.shipment_id);
-    const totalWeight = (shipRows||[]).reduce((s,r)=> s+(r.gross_weight||0), 0);
-    if(!ids.length) return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
-    let sum = 0; const weights = {};
-    for(const chunk of chunkArray(ids,200)){
-      const {data} = await sbClient.from('shipment_costs').select('shipment_id, provisional_amount').eq('cost_header', header).in('shipment_id', chunk);
-      (data||[]).forEach(r=> sum += (r.provisional_amount||0));
-    }
-    (shipRows||[]).forEach(r=> weights[r.shipment_id] = r.gross_weight||0);
-    return {sum, shipmentIds: ids, weights, totalWeight};
-  }
-}
-
-async function routeInvoiceForApproval(invoiceId){
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
-  let worstPct = 0, worstVal = 0; const lobsInvolved = new Set();
-  for(const tag of tags){
-    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
-    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
-    const delta = actual - summary.sum;
-    const pct = summary.sum!==0 ? Math.abs(delta/summary.sum*100) : (actual!==0?100:0);
-    if(Math.abs(delta) > worstVal || pct > worstPct){ worstVal = Math.max(worstVal, Math.abs(delta)); worstPct = Math.max(worstPct, pct); }
-    for(const sid of summary.shipmentIds){
-      const {data:s} = await sbClient.from('shipments').select('lob').eq('shipment_id', sid).maybeSingle();
-      if(s && s.lob) lobsInvolved.add(s.lob);
-    }
-  }
-  const isMultiLob = lobsInvolved.size > 1;
-  let level = 'LOB_OWNER';
-  if(isMultiLob){ level = 'FINANCE_HEAD'; }
-  else {
-    const lob = [...lobsInvolved][0] || null;
-    const header = tags[0] ? tags[0].cost_header : null;
-    const { data: th } = await sbClient.from('approval_thresholds').select('*').eq('lob', lob).eq('cost_header', header).maybeSingle();
-    if(th){
-      if(worstPct >= th.ceo_pct && worstVal >= th.ceo_value) level = 'CEO';
-      else if(worstPct >= th.finance_head_pct && worstVal >= th.finance_head_value) level = 'FINANCE_HEAD';
-    }
-  }
-  await sbClient.from('invoices').update({status:'PENDING_APPROVAL', current_level: level, is_multi_lob: isMultiLob}).eq('id', invoiceId);
 }
 
 async function loadOtherInvoices(){
   const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').order('created_at', {ascending:false}).limit(30);
   const wrap = document.getElementById('oi-list');
-  const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM'));
+  const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM') || (i.invoice_tags.length && i.taxable_amount!==0));
   if(!others.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
-  wrap.innerHTML = others.map(inv=>`
-    <div class="invcard">
+  wrap.innerHTML = others.map(inv=>invoiceCardHTML(inv)).join('');
+  wireInvoiceCardActions(wrap);
+}
+function invoiceCardHTML(inv){
+  return `<div class="invcard" data-inv="${inv.id}">
       <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code} ${inv.invoice_number||''}</div><span class="status-pill st-${(inv.status||'').toLowerCase()}">${inv.status}</span></div>
-      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} · Level: ${inv.current_level||'—'} ${inv.is_multi_lob?'· <b>multi-LOB</b>':''} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''}</div>
-      <div class="meta">${inv.invoice_tags.map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
-    </div>`).join('');
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''}</div>
+      <div class="meta">${(inv.invoice_tags||[]).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
+      <div class="row-actions">
+        <button class="btn secondary btn-sm act-view-detail">View detail</button>
+        ${inv.status==='PENDING_REVIEW' ? `<button class="btn teal btn-sm act-accept">Accept</button><button class="btn amber btn-sm act-dispute">Flag for dispute</button>` : ''}
+      </div>
+      <div class="detail-box" id="detail-${inv.id}" style="display:none;"></div>
+    </div>`;
+}
+function wireInvoiceCardActions(scope){
+  scope.querySelectorAll('.act-view-detail').forEach(b=>b.addEventListener('click', e=> toggleInvoiceDetail(e.target.closest('.invcard').dataset.inv)));
+  scope.querySelectorAll('.act-accept').forEach(b=>b.addEventListener('click', e=> acceptInvoice(e.target.closest('.invcard').dataset.inv)));
+  scope.querySelectorAll('.act-dispute').forEach(b=>b.addEventListener('click', e=> flagDispute(e.target.closest('.invcard').dataset.inv)));
+}
+async function toggleInvoiceDetail(invoiceId){
+  const slot = document.getElementById('detail-'+invoiceId);
+  if(slot.style.display==='block'){ slot.style.display='none'; return; }
+  slot.style.display='block'; slot.innerHTML = '<div class="small">Loading…</div>';
+  const {inv, tagSummaries, isMultiLob, lobs} = await computeInvoiceSummary(invoiceId);
+  let docLink = '';
+  if(inv.source_file_path){
+    try{ const {data} = await sbClient.storage.from('invoice-documents').createSignedUrl(inv.source_file_path, 3600); if(data?.signedUrl) docLink = `<a href="${data.signedUrl}" target="_blank" class="small">Open source document</a><br>`; }catch(e){}
+  }
+  let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'');
+  tagSummaries.forEach(t=>{
+    html += `<div class="note" style="background:#fff;"><b>${HEADER_LABEL[t.tag.cost_header]||t.tag.cost_header}</b> · ${t.tag.group_type}:${t.tag.group_key} — ${t.summary.shipmentIds.length} shipment(s), ${fmt(t.totalW)} kg<br>
+      Provisional: ${fmt(t.summary.sum)} · Actual: ${fmt(t.actual)} · Variance: <span style="color:${t.variance>0?'var(--red)':(t.variance<0?'var(--teal)':'inherit')}">${fmt(t.variance)} (${t.pct.toFixed(2)}%)</span></div>`;
+  });
+  const { data: actions } = await sbClient.from('approval_actions').select('*').eq('invoice_id', invoiceId).order('created_at');
+  if(actions && actions.length) html += `<div class="small" style="margin-top:6px;"><b>Action log:</b><br>` + actions.map(a=>`${a.action}${a.reason?(' — '+a.reason):''} (${new Date(a.created_at).toLocaleString()})`).join('<br>') + `</div>`;
+  slot.innerHTML = html;
+}
+async function acceptInvoice(invoiceId){
+  const { data: tags } = await sbClient.from('invoice_tags').select('id').eq('invoice_id', invoiceId).limit(1);
+  if(tags && tags.length) await finalizeApproval(invoiceId); else await finalizeLMApproval(invoiceId);
+  await logAction(invoiceId, 'ACCEPTED', CURRENT_USER.id, null);
+  await loadOtherInvoices(); await loadLMInvoiceGroups(); await loadReviewQueue();
+}
+async function flagDispute(invoiceId){
+  const {tagSummaries} = await computeInvoiceSummary(invoiceId);
+  const t = tagSummaries[0];
+  const draft = t ? draftDisputeText(HEADER_LABEL[t.tag.cost_header]||t.tag.cost_header, t.tag.group_type, t.tag.group_key, t.totalW, t.summary.shipmentIds.length, t.summary.sum, t.actual) : '';
+  const text = prompt('Dispute text (edit as needed):', draft);
+  if(text===null) return;
+  await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:text, raised_by:CURRENT_USER.id});
+  await sbClient.from('invoices').update({status:'DISPUTED'}).eq('id', invoiceId);
+  await logAction(invoiceId, 'DISPUTE_RAISED', CURRENT_USER.id, null);
+  await loadOtherInvoices(); await loadDisputes(); await loadReviewQueue();
+}
+async function finalizeApproval(invoiceId){
+  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
+  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
+  for(const tag of tags){
+    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+    const variance = actual - summary.sum;
+    const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
+    for(const sid of summary.shipmentIds){
+      const { data: sc } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid).eq('cost_header', tag.cost_header).maybeSingle();
+      const prov = sc ? sc.provisional_amount : 0;
+      const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
+      const shipmentActual = prov + share*variance;
+      await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
+    }
+    await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tag.id);
+  }
+  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
+}
+async function finalizeLMApproval(invoiceId){
+  await sbClient.from('box_lm_costs').update({status:'REVERSED'}).eq('locked_by_invoice_id', invoiceId);
+  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
 }
 
-/* ============================= LAST MILE INVOICES (reuse pilot mechanism) ============================= */
+/* ============================= LAST MILE INVOICES ============================= */
 document.getElementById('btn-new-lm-invgroup').addEventListener('click', async ()=>{
   const name = document.getElementById('lm-inv-name').value.trim();
   const sourceFile = document.getElementById('lm-source').files[0];
@@ -760,18 +861,22 @@ document.getElementById('btn-new-lm-invgroup').addEventListener('click', async (
   await loadLMInvoiceGroups();
 });
 async function loadLMInvoiceGroups(){
-  const { data } = await sbClient.from('invoices').select('*, invoice_lines(*)').is('taxable_amount', 0).order('created_at',{ascending:false}).limit(20);
+  const { data } = await sbClient.from('invoices').select('*, invoice_lines(*)').order('created_at',{ascending:false}).limit(20);
+  const lmOnly = (data||[]).filter(g => g.currency==='INR' && (g.status==='DRAFT' || (g.invoice_lines && g.invoice_lines.length)) && !g.invoice_tags);
   const wrap = document.getElementById('lm-invgroup-list');
-  if(!data || !data.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
-  wrap.innerHTML = data.map(g=>`
-    <div class="invcard">
-      <div class="hd"><div class="name">${g.vendor_code}</div><span class="small">${(g.invoice_lines||[]).length} lines</span></div>
+  if(!lmOnly.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
+  wrap.innerHTML = lmOnly.map(g=>`
+    <div class="invcard" data-inv="${g.id}">
+      <div class="hd"><div class="name">#${g.id} — ${g.vendor_code}</div><span class="status-pill st-${(g.status||'').toLowerCase()}">${g.status}</span></div>
+      <div class="meta">${(g.invoice_lines||[]).length} lines · Total: ${fmt(g.taxable_amount)}</div>
       <div class="row-actions">
         <label class="btn secondary btn-sm" style="cursor:pointer;">Attach detail file (CSV/XLSX)
           <input type="file" accept=".csv,.xlsx,.xls" style="display:none;" data-inv="${g.id}" class="attach-lm-detail">
         </label>
+        ${g.status==='PENDING_REVIEW' ? `<button class="btn teal btn-sm act-accept">Accept</button><button class="btn amber btn-sm act-dispute">Flag for dispute</button>` : ''}
       </div>
     </div>`).join('');
+  wireInvoiceCardActions(wrap);
   wrap.querySelectorAll('.attach-lm-detail').forEach(inp=>{
     inp.addEventListener('change', async (e)=>{
       const file = e.target.files[0]; if(!file) return;
@@ -790,18 +895,12 @@ async function loadLMInvoiceGroups(){
         if(!shipmentId) return;
         const amount = amtCol ? Math.abs(num(row[amtCol])) : NaN;
         if(isNaN(amount)) return;
-        const raw = chargeCol ? String(row[chargeCol]).trim() : '';
-        lines.push({invoice_id:invId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:raw, charge_code:null, amount});
+        lines.push({invoice_id:invId, shipment_id:shipmentId, box_id:boxId||null, charge_code_raw:chargeCol?String(row[chargeCol]).trim():'', charge_code:null, amount});
       });
       for(const chunk of chunkArray(lines,500)){ await sbClient.from('invoice_lines').insert(chunk.map(l=>({invoice_id:l.invoice_id, charge_code_raw:l.charge_code_raw, charge_code:l.charge_code, amount:l.amount}))); }
-      // also record against box_lm_costs.actual_amount for matching
-      for(const l of lines){
-        if(l.box_id){
-          await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null);
-        }
-      }
-      await sbClient.from('invoices').update({taxable_amount: lines.reduce((s,l)=>s+l.amount,0), status:'PENDING_APPROVAL', current_level:'LOB_OWNER'}).eq('id', invId);
-      await loadLMInvoiceGroups(); await loadChargeCodes();
+      for(const l of lines){ if(l.box_id){ await sbClient.from('box_lm_costs').update({actual_amount: l.amount, status:'LOCKED', locked_by_invoice_id:invId}).eq('box_id', l.box_id).is('actual_amount', null); } }
+      await sbClient.from('invoices').update({taxable_amount: lines.reduce((s,l)=>s+l.amount,0), status:'PENDING_REVIEW'}).eq('id', invId);
+      await loadLMInvoiceGroups(); await loadChargeCodes(); await loadReviewQueue();
     });
   });
 }
@@ -820,194 +919,109 @@ document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>
   document.getElementById('lm-recon-note').textContent = `${results.length} box/charge rows.`;
 });
 
-/* ============================= APPROVAL QUEUE ============================= */
-async function loadQueue(){
-  const role = CURRENT_PROFILE.role;
+/* ============================= REVIEW QUEUE (single-step, both flows) ============================= */
+async function loadReviewQueue(){
   const wrap = document.getElementById('queue-list');
-  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('status','PENDING_APPROVAL').order('created_at');
-  let mine = (data||[]).filter(inv=> inv.current_level === role || (role==='FINANCE_MANAGER'));
-  if(!mine.length){ wrap.innerHTML = '<div class="emptystate">Nothing in your queue.</div>'; return; }
-  wrap.innerHTML = mine.map(inv=>{
-    const makerBlocked = inv.entered_by === CURRENT_USER.id;
-    return `<div class="invcard" data-inv="${inv.id}">
-      <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code}</div><span class="status-pill st-pending_approval">${inv.current_level}${inv.is_multi_lob?' · MULTI-LOB':''}</span></div>
-      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency}</div>
-      <div class="meta">${(inv.invoice_tags||[]).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
-      ${makerBlocked ? '<div class="note warn">You entered/tagged this invoice — maker&ne;checker rule blocks you from approving it. Escalating to Finance Head.</div>' : ''}
-      <div class="row-actions">
-        <button class="btn teal btn-sm act-approve" ${makerBlocked?'disabled':''}>Approve</button>
-        <button class="btn red btn-sm act-reject">Reject</button>
-        <button class="btn secondary btn-sm act-sendback">Send back</button>
-        <button class="btn secondary btn-sm act-reassign">Reassign</button>
-        <button class="btn amber btn-sm act-escalate">Escalate now</button>
-        ${inv.is_multi_lob ? '<button class="btn secondary btn-sm act-splitlob">Assign to one LOB Owner</button>' : ''}
-      </div>
-    </div>`;
-  }).join('');
-  wrap.querySelectorAll('.act-approve').forEach(b=>b.addEventListener('click', e=> approveInvoice(e.target.closest('.invcard').dataset.inv)));
-  wrap.querySelectorAll('.act-reject').forEach(b=>b.addEventListener('click', e=> rejectInvoice(e.target.closest('.invcard').dataset.inv)));
-  wrap.querySelectorAll('.act-sendback').forEach(b=>b.addEventListener('click', e=> sendBackInvoice(e.target.closest('.invcard').dataset.inv)));
-  wrap.querySelectorAll('.act-reassign').forEach(b=>b.addEventListener('click', e=> reassignInvoice(e.target.closest('.invcard').dataset.inv)));
-  wrap.querySelectorAll('.act-escalate').forEach(b=>b.addEventListener('click', e=> escalateInvoice(e.target.closest('.invcard').dataset.inv)));
-  wrap.querySelectorAll('.act-splitlob').forEach(b=>b.addEventListener('click', e=> assignSingleLobOwner(e.target.closest('.invcard').dataset.inv)));
-}
-async function logAction(invoiceId, action, level, actor, reason, escalation=false, reassignedTo=null){
-  await sbClient.from('approval_actions').insert({invoice_id:invoiceId, action, level, actor, reason, is_escalation_driven:escalation, reassigned_to:reassignedTo});
-}
-async function approveInvoice(invoiceId){
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  if(inv.entered_by === CURRENT_USER.id){ alert('Maker≠checker: you entered this invoice, escalating to Finance Head instead.'); await sbClient.from('invoices').update({current_level:'FINANCE_HEAD'}).eq('id', invoiceId); await loadQueue(); return; }
-  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
-  const isLast = inv.current_level==='CEO' || idx===APPROVAL_CHAIN.length-1 || inv.current_level==='FINANCE_HEAD' && false;
-  // Determine if this level is the final required level: recompute using thresholds would be more precise;
-  // simplified here — CEO is always final; FINANCE_HEAD/LOB_OWNER finalize if no higher escalation was set at routing time.
-  if(inv.current_level==='CEO'){
-    await finalizeApproval(invoiceId);
-  } else {
-    // check if invoice was routed to escalate further; if current_level is the level it was routed to, it's final
-    await finalizeApproval(invoiceId);
-  }
-  await logAction(invoiceId, 'APPROVED', inv.current_level, CURRENT_USER.id, null);
-  await loadQueue();
-}
-async function finalizeApproval(invoiceId){
-  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  for(const tag of tags){
-    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
-    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
-    const variance = actual - summary.sum;
-    // re-apportion per-kg using OUR recorded weights, and reverse+book actual on each shipment_costs row
-    const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
-    for(const sid of summary.shipmentIds){
-      const { data: sc } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid).eq('cost_header', tag.cost_header).maybeSingle();
-      const prov = sc ? sc.provisional_amount : 0;
-      const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
-      const shipmentActual = prov + share*variance;
-      await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
-    }
-    await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tag.id);
-  }
-  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
-}
-async function rejectInvoice(invoiceId){
-  const reason = prompt('Reason for rejection?'); if(!reason) return;
-  await sbClient.from('invoices').update({status:'REJECTED'}).eq('id', invoiceId);
-  await logAction(invoiceId, 'REJECTED', CURRENT_PROFILE.role, CURRENT_USER.id, reason);
-  await loadQueue();
-}
-async function sendBackInvoice(invoiceId){
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
-  if(idx<=0){ alert('Already at the first level — cannot send back further.'); return; }
-  const reason = prompt('Reason for sending back?'); if(!reason) return;
-  await sbClient.from('invoices').update({current_level: APPROVAL_CHAIN[idx-1]}).eq('id', invoiceId);
-  await logAction(invoiceId, 'SENT_BACK', inv.current_level, CURRENT_USER.id, reason);
-  await loadQueue();
-}
-async function reassignInvoice(invoiceId){
-  const toUser = prompt('User ID to reassign to?'); if(!toUser) return;
-  await logAction(invoiceId, 'REASSIGNED', CURRENT_PROFILE.role, CURRENT_USER.id, 'Manual reassignment', false, toUser);
-  await loadQueue();
-}
-async function escalateInvoice(invoiceId){
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  const idx = APPROVAL_CHAIN.indexOf(inv.current_level);
-  const next = APPROVAL_CHAIN[Math.min(idx+1, APPROVAL_CHAIN.length-1)];
-  await sbClient.from('invoices').update({current_level: next}).eq('id', invoiceId);
-  await logAction(invoiceId, 'ESCALATED', next, CURRENT_USER.id, 'Aged past SLA', true);
-  await loadQueue();
-}
-async function assignSingleLobOwner(invoiceId){
-  const lobOwnerUserId = prompt('User ID of the LOB Owner to assign this whole invoice to?'); if(!lobOwnerUserId) return;
-  await sbClient.from('invoices').update({current_level:'LOB_OWNER'}).eq('id', invoiceId);
-  await logAction(invoiceId, 'REASSIGNED', 'LOB_OWNER', CURRENT_USER.id, 'Finance Head wildcard: assigned multi-LOB invoice to single LOB Owner', false, lobOwnerUserId);
-  await loadQueue();
-}
-
-/* Finance Manager suo moto override — only for in-queue invoices */
-async function financeManagerOverride(invoiceId){
-  if(CURRENT_PROFILE.role !== 'FINANCE_MANAGER'){ alert('Only Finance Manager can do this.'); return; }
-  const { data: inv } = await sbClient.from('invoices').select('status').eq('id', invoiceId).single();
-  if(inv.status !== 'PENDING_APPROVAL'){ alert('Override only applies to invoices still in queue — this one has already been finalized.'); return; }
-  const newLevel = prompt('New approval level (LOB_OWNER / FINANCE_HEAD / CEO)?'); if(!newLevel) return;
-  const reason = prompt('Mandatory reason for override:'); if(!reason) return;
-  await sbClient.from('invoices').update({current_level:newLevel}).eq('id', invoiceId);
-  await logAction(invoiceId, 'OVERRIDE', newLevel, CURRENT_USER.id, reason);
-  await loadQueue();
+  const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('status','PENDING_REVIEW').order('created_at');
+  if(!data || !data.length){ wrap.innerHTML = '<div class="emptystate">Nothing awaiting review.</div>'; return; }
+  wrap.innerHTML = data.map(inv=>invoiceCardHTML(inv)).join('');
+  wireInvoiceCardActions(wrap);
 }
 
 /* ============================= DISPUTES ============================= */
 async function loadDisputes(){
-  const { data } = await sbClient.from('invoices').select('*, disputes(*)').in('status',['PENDING_APPROVAL','APPROVED']).order('created_at',{ascending:false}).limit(30);
+  const { data } = await sbClient.from('disputes').select('*, invoices(*)').order('created_at',{ascending:false}).limit(30);
   const wrap = document.getElementById('dispute-list');
-  wrap.innerHTML = (data||[]).map(inv=>{
-    const d = (inv.disputes||[])[0];
-    return `<div class="invcard" data-inv="${inv.id}">
-      <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code}</div>${d?`<span class="status-pill st-${d.status.toLowerCase()}">${d.status}</span>`:''}</div>
-      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency}</div>
-      ${d ? `<div class="meta">${d.dispute_text||''}</div>` : `
-        <div class="row-actions">
-          <input type="text" class="dispute-text" placeholder="Dispute description (vendor-facing)" style="max-width:400px;">
-          <button class="btn amber btn-sm act-raise-dispute">Raise dispute</button>
-        </div>`}
-      ${d && d.status==='RAISED' ? `
+  if(!data || !data.length){ wrap.innerHTML = '<div class="emptystate">No disputes yet.</div>'; return; }
+  wrap.innerHTML = data.map(d=>`
+    <div class="invcard" data-dispute="${d.id}" data-inv="${d.invoice_id}">
+      <div class="hd"><div class="name">Invoice #${d.invoice_id} — ${d.invoices?.vendor_code||''}</div><span class="status-pill st-${d.status.toLowerCase()}">${d.status}</span></div>
+      <div class="meta">${d.dispute_text||''}</div>
+      ${d.resolution_reason?`<div class="meta">Resolution: ${d.resolution_reason}</div>`:''}
+      ${d.settled_basis?`<div class="meta">Settled basis: ${d.settled_basis}</div>`:''}
+      ${d.status==='RAISED' ? `
         <div class="row-actions">
           <button class="btn teal btn-sm act-agree">Agreed — needs Credit Note</button>
           <button class="btn red btn-sm act-deny">Denied — explain why our data was wrong</button>
           <button class="btn secondary btn-sm act-settle">Settled — enter final basis</button>
         </div>` : ''}
-    </div>`;
-  }).join('') || '<div class="emptystate">No invoices to review.</div>';
-
-  wrap.querySelectorAll('.act-raise-dispute').forEach(b=>b.addEventListener('click', async e=>{
-    const card = e.target.closest('.invcard'); const invId = card.dataset.inv;
-    const text = card.querySelector('.dispute-text').value.trim();
-    await sbClient.from('disputes').insert({invoice_id:invId, status:'RAISED', dispute_text:text, raised_by:CURRENT_USER.id});
-    await sbClient.from('invoices').update({status:'DISPUTED'}).eq('id', invId);
-    await loadDisputes();
-  }));
+    </div>`).join('');
   wrap.querySelectorAll('.act-agree').forEach(b=>b.addEventListener('click', async e=>{
-    const invId = e.target.closest('.invcard').dataset.inv;
+    const card = e.target.closest('.invcard'); const disputeId=card.dataset.dispute, invId=card.dataset.inv;
     const amount = num(prompt('Credit Note amount?')); const reason = prompt('CN reason?');
     if(isNaN(amount)) return;
-    const { data: d } = await sbClient.from('disputes').select('id').eq('invoice_id', invId).single();
-    await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:d.id, amount, reason});
-    await sbClient.from('disputes').update({status:'AGREED', resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:disputeId, amount, reason});
+    await sbClient.from('disputes').update({status:'AGREED', resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('id', disputeId);
     await loadDisputes();
   }));
   wrap.querySelectorAll('.act-deny').forEach(b=>b.addEventListener('click', async e=>{
-    const invId = e.target.closest('.invcard').dataset.inv;
+    const card = e.target.closest('.invcard'); const disputeId=card.dataset.dispute;
     const reason = prompt('Mandatory: why was our data wrong?'); if(!reason) return;
-    await sbClient.from('disputes').update({status:'DENIED', resolution_reason:reason, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    await sbClient.from('disputes').update({status:'DENIED', resolution_reason:reason, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('id', disputeId);
     await loadDisputes();
   }));
   wrap.querySelectorAll('.act-settle').forEach(b=>b.addEventListener('click', async e=>{
-    const invId = e.target.closest('.invcard').dataset.inv;
+    const card = e.target.closest('.invcard'); const disputeId=card.dataset.dispute, invId=card.dataset.inv;
     const basis = prompt('Final settled basis (e.g. "715kg at Rs500")'); if(!basis) return;
     const amount = num(prompt('Credit Note amount for the difference (0 if none)?')) || 0;
-    if(amount>0){ const { data: d } = await sbClient.from('disputes').select('id').eq('invoice_id', invId).single(); await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:d.id, amount, reason:'Settlement CN'}); }
-    await sbClient.from('disputes').update({status:'SETTLED', settled_basis:basis, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('invoice_id', invId);
+    if(amount>0){ await sbClient.from('credit_notes').insert({invoice_id:invId, dispute_id:disputeId, amount, reason:'Settlement CN'}); }
+    await sbClient.from('disputes').update({status:'SETTLED', settled_basis:basis, resolved_by:CURRENT_USER.id, resolved_at:new Date().toISOString()}).eq('id', disputeId);
     await loadDisputes();
   }));
 }
 
+/* ============================= SHIPMENT LOOKUP ============================= */
+document.getElementById('btn-sl-search').addEventListener('click', runShipmentLookup);
+document.getElementById('sl-search').addEventListener('keydown', e=>{ if(e.key==='Enter') runShipmentLookup(); });
+async function runShipmentLookup(){
+  const sid = document.getElementById('sl-search').value.trim();
+  const result = document.getElementById('sl-result');
+  if(!sid) return;
+  result.innerHTML = '<div class="small">Looking up…</div>';
+  const { data: ship } = await sbClient.from('shipments').select('*').eq('shipment_id', sid).maybeSingle();
+  if(!ship){ result.innerHTML = '<div class="emptystate">No shipment found with that ID.</div>'; return; }
+  const { data: costs } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid);
+  const { data: boxes } = await sbClient.from('box_lm_costs').select('*').eq('shipment_id', sid);
+  const totalProv = (costs||[]).reduce((s,c)=>s+(c.provisional_amount||0),0);
+  const totalAct = (costs||[]).reduce((s,c)=>s+(c.actual_amount!=null?c.actual_amount:c.provisional_amount),0);
+  let html = `<div class="ledgerstrip">
+    <div class="cell"><div class="lab">LOB</div><div class="val" style="font-size:14px;">${ship.lob||'Unassigned'}</div></div>
+    <div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(ship.revenue_amount)}</div></div>
+    <div class="cell"><div class="lab">Contribution (provisional)</div><div class="val">${fmt((ship.revenue_amount||0)-totalProv)}</div></div>
+    <div class="cell"><div class="lab">Contribution (to-date actual)</div><div class="val">${fmt((ship.revenue_amount||0)-totalAct)}</div></div>
+  </div>
+  <div class="small">MAWB: ${ship.mawb||'—'} · Node: ${ship.node||'—'} · Pickup: ${ship.pickup_date||'—'} · Weight: ${fmt(ship.gross_weight)} kg</div>
+  <div class="tablewrap"><table class="data"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th>Invoice</th></tr></thead><tbody>`;
+  (costs||[]).forEach(c=> html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'—'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td>${c.locked_by_invoice_id?`#${c.locked_by_invoice_id}`:''}</td></tr>`);
+  html += `</tbody></table></div>`;
+  if(boxes && boxes.length){
+    html += `<h3 style="margin-top:12px;font-size:12px;">Last Mile box detail</h3><div class="tablewrap"><table class="data"><thead><tr><th>Box</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th></tr></thead><tbody>`;
+    boxes.forEach(b=> html += `<tr><td class="mono">${b.box_id}</td><td class="mono">${b.charge_code}</td><td class="num">${fmt(b.amount)}</td><td class="num">${b.actual_amount!=null?fmt(b.actual_amount):'—'}</td><td><span class="status-pill st-${(b.status||'').toLowerCase()}">${b.status}</span></td></tr>`);
+    html += `</tbody></table></div>`;
+  }
+  result.innerHTML = html;
+}
+
 /* ============================= AGING & WRITE-BACK ============================= */
-document.getElementById('btn-run-aging').addEventListener('click', async ()=>{
+async function runAgingReport(){
   const asof = document.getElementById('aging-asof').value || todayISO();
+  document.getElementById('aging-asof').value = asof;
   const { data: openCosts } = await sbClient.from('shipment_costs').select('*, shipments(pickup_date, mawb, node)').eq('status','OPEN');
   const tb = document.querySelector('#aging-table tbody'); tb.innerHTML='';
-  (openCosts||[]).forEach(r=>{
+  if(!openCosts || !openCosts.length){ tb.innerHTML = '<tr><td colspan="5" class="small">No open provisions — either everything is invoiced/reversed, or no shipment data has been uploaded yet.</td></tr>'; return; }
+  openCosts.sort((a,b)=>{ const da=a.shipments?.pickup_date||'', db=b.shipments?.pickup_date||''; return da<db?-1:1; });
+  openCosts.forEach(r=>{
     const pd = r.shipments ? r.shipments.pickup_date : null;
     const days = pd ? daysBetween(pd, asof) : null;
     tb.innerHTML += `<tr data-sid="${r.shipment_id}" data-header="${r.cost_header}"><td><input type="checkbox" class="aging-check"></td><td class="mono">${r.shipment_id}</td><td>${HEADER_LABEL[r.cost_header]||r.cost_header}</td><td class="num">${fmt(r.provisional_amount)}</td><td class="num">${days!=null?days:'—'}</td></tr>`;
   });
-});
+}
+document.getElementById('btn-run-aging').addEventListener('click', runAgingReport);
 document.getElementById('aging-select-all').addEventListener('change', e=>{ document.querySelectorAll('.aging-check').forEach(c=>c.checked = e.target.checked); });
 document.getElementById('btn-writeback').addEventListener('click', async ()=>{
   const reason = document.getElementById('writeback-reason').value.trim();
   if(!reason){ alert('A reason is mandatory for write-back.'); return; }
-  const rows = [...document.querySelectorAll('#aging-table tbody tr')].filter(tr=>tr.querySelector('.aging-check').checked);
+  const rows = [...document.querySelectorAll('#aging-table tbody tr')].filter(tr=>tr.querySelector('.aging-check') && tr.querySelector('.aging-check').checked);
   for(const tr of rows){
     const sid = tr.dataset.sid, header = tr.dataset.header;
     const amount = num(tr.children[3].textContent);
@@ -1015,19 +1029,39 @@ document.getElementById('btn-writeback').addEventListener('click', async ()=>{
     await sbClient.from('shipment_costs').update({status:'WRITTEN_BACK'}).eq('shipment_id', sid).eq('cost_header', header);
   }
   document.getElementById('writeback-reason').value='';
-  document.getElementById('btn-run-aging').click();
+  await runAgingReport();
 });
 
-/* ============================= P&L / ACCOUNTING ============================= */
-document.getElementById('btn-run-pnl').addEventListener('click', async ()=>{
+/* ============================= P&L / ACCOUNTING (leg-wise) ============================= */
+async function runPnL(){
   const { data: ships } = await sbClient.from('shipments').select('*');
   const { data: costs } = await sbClient.from('shipment_costs').select('*');
-  const costByShip = {};
-  (costs||[]).forEach(c=>{ costByShip[c.shipment_id] = (costByShip[c.shipment_id]||0) + (c.actual_amount!=null ? c.actual_amount : c.provisional_amount); });
+  const costByShip = {}, maturityByShip = {}, byHeader = {};
+  (costs||[]).forEach(c=>{
+    const hasActual = c.actual_amount!=null;
+    const actualOrProv = hasActual ? c.actual_amount : c.provisional_amount;
+    costByShip[c.shipment_id] = (costByShip[c.shipment_id]||0) + actualOrProv;
+    if(!maturityByShip[c.shipment_id]) maturityByShip[c.shipment_id] = {any:false, all:true, count:0};
+    maturityByShip[c.shipment_id].any = maturityByShip[c.shipment_id].any || hasActual;
+    maturityByShip[c.shipment_id].all = maturityByShip[c.shipment_id].all && hasActual;
+    maturityByShip[c.shipment_id].count++;
+    if(!byHeader[c.cost_header]) byHeader[c.cost_header] = {prov:0, act:0, withActual:0, total:0};
+    byHeader[c.cost_header].prov += c.provisional_amount||0;
+    byHeader[c.cost_header].act += actualOrProv;
+    byHeader[c.cost_header].total++;
+    if(hasActual) byHeader[c.cost_header].withActual++;
+  });
+  const ht = document.querySelector('#pnl-header-table tbody'); ht.innerHTML='';
+  Object.entries(byHeader).forEach(([h,v])=>{
+    const variance = v.act - v.prov;
+    ht.innerHTML += `<tr><td>${HEADER_LABEL[h]||h}</td><td class="num">${fmt(v.prov)}</td><td class="num">${fmt(v.act)}</td><td class="num">${fmt(variance)}</td><td class="small">${v.withActual}/${v.total} actualised</td></tr>`;
+  });
   const rows = (ships||[]).map(s=>{
     const cost = costByShip[s.shipment_id] || 0;
     const revenue = s.revenue_amount || 0;
-    return {shipment_id:s.shipment_id, lob:s.lob||'Unassigned', revenue, cost, contribution:revenue-cost, maturity: 'Mixed'};
+    const m = maturityByShip[s.shipment_id];
+    const maturity = !m ? 'No cost data' : (m.all ? 'Actual' : (m.any ? 'Mixed' : 'Provisional'));
+    return {shipment_id:s.shipment_id, lob:s.lob||'Unassigned', revenue, cost, contribution:revenue-cost, maturity};
   });
   const byLOB = {};
   rows.forEach(r=>{ if(!byLOB[r.lob]) byLOB[r.lob]={revenue:0,cost:0}; byLOB[r.lob].revenue+=r.revenue; byLOB[r.lob].cost+=r.cost; });
@@ -1035,18 +1069,31 @@ document.getElementById('btn-run-pnl').addEventListener('click', async ()=>{
   document.getElementById('pnl-strip').innerHTML = `<div class="ledgerstrip"><div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(totalRev)}</div></div><div class="cell"><div class="lab">Cost</div><div class="val">${fmt(totalCost)}</div></div><div class="cell"><div class="lab">Contribution</div><div class="val ${(totalRev-totalCost)<0?'neg':'pos'}">${fmt(totalRev-totalCost)}</div></div></div>`;
   const lt = document.querySelector('#pnl-lob-table tbody'); lt.innerHTML='';
   Object.entries(byLOB).forEach(([lob,v])=>{ const c=v.revenue-v.cost; lt.innerHTML += `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.cost)}</td><td class="num">${fmt(c)}</td><td class="num">${v.revenue?(c/v.revenue*100).toFixed(1):'0.0'}%</td></tr>`; });
+  drawPnLShipTable(rows);
+  window._pnlRows = rows;
+}
+function drawPnLShipTable(rows){
   const st = document.querySelector('#pnl-ship-table tbody'); st.innerHTML='';
-  rows.forEach(r=> st.innerHTML += `<tr><td class="mono">${r.shipment_id}</td><td>${r.lob}</td><td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.contribution)}</td><td class="small">${r.maturity}</td></tr>`);
+  rows.forEach(r=> st.innerHTML += `<tr><td class="mono" style="cursor:pointer;color:var(--teal);" data-jump="${r.shipment_id}">${r.shipment_id}</td><td>${r.lob}</td><td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.contribution)}</td><td class="small">${r.maturity}</td></tr>`);
+  st.querySelectorAll('[data-jump]').forEach(td=>td.addEventListener('click', ()=>{
+    document.getElementById('sl-search').value = td.dataset.jump;
+    switchTab('shiplookup'); runShipmentLookup();
+  }));
+}
+document.getElementById('btn-run-pnl').addEventListener('click', runPnL);
+document.getElementById('pnl-search').addEventListener('input', ()=>{
+  const q = document.getElementById('pnl-search').value.toLowerCase();
+  drawPnLShipTable((window._pnlRows||[]).filter(r=> !q || r.shipment_id.toLowerCase().includes(q) || r.lob.toLowerCase().includes(q)));
 });
 
 /* ============================= ADMIN ============================= */
 async function loadUsersAndThresholds(){
   const { data: users } = await sbClient.from('user_profiles').select('*');
   const ut = document.querySelector('#users-table tbody'); ut.innerHTML='';
-  (users||[]).forEach(u=> ut.innerHTML += `<tr><td class="mono">${u.user_id.slice(0,8)}…</td><td>${u.full_name||''}</td><td>${u.role}</td><td>${u.lob||''}</td><td></td></tr>`);
+  (users||[]).forEach(u=> ut.innerHTML += `<tr><td class="mono">${u.user_id.slice(0,8)}…</td><td>${u.full_name||''}</td><td>${u.role}</td><td>${u.lob||''}</td></tr>`);
   const { data: th } = await sbClient.from('approval_thresholds').select('*').order('lob');
   const tt = document.querySelector('#threshold-table tbody'); tt.innerHTML='';
-  (th||[]).forEach(t=> tt.innerHTML += `<tr><td>${t.lob}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header}</td><td class="num">${t.finance_head_pct}</td><td class="num">${fmt(t.finance_head_value)}</td><td class="num">${t.ceo_pct}</td><td class="num">${fmt(t.ceo_value)}</td><td></td></tr>`);
+  (th||[]).forEach(t=> tt.innerHTML += `<tr><td>${t.lob}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header}</td><td class="num">${t.finance_head_pct}</td><td class="num">${fmt(t.finance_head_value)}</td><td class="num">${t.ceo_pct}</td><td class="num">${fmt(t.ceo_value)}</td></tr>`);
 }
 document.getElementById('btn-add-user').addEventListener('click', async ()=>{
   const user_id = document.getElementById('new-user-id').value.trim();
@@ -1062,11 +1109,12 @@ document.getElementById('btn-add-user').addEventListener('click', async ()=>{
 function switchTab(name){
   document.querySelectorAll('nav.steps button').forEach(b=> b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpanel').forEach(p=> p.classList.toggle('active', p.id==='tab-'+name));
-  if(name==='queue') loadQueue();
+  if(name==='queue') loadReviewQueue();
   if(name==='disputes') loadDisputes();
+  if(name==='aging') runAgingReport();
+  if(name==='reports') runPnL();
 }
 document.querySelectorAll('nav.steps button').forEach(b=> b.addEventListener('click', ()=> switchTab(b.dataset.tab)));
-document.getElementById('tagedit-close').addEventListener('click', ()=> document.getElementById('tagedit-modal').classList.remove('open'));
 </script>
 </body>
 </html>
