@@ -54,3 +54,7 @@
 ---
 
 *Migration required before this build works: run `migration_fx_and_delete.sql` in Supabase SQL Editor first — it adds the FX rates table and new columns this version depends on.*
+
+## Last Mile — rebuilt as a proper tag-based system (was a direct-write mechanism that never closed the loop)
+**DONE**: new `lm_invoice_tags` table (`migration_lm_tags.sql` — run this too), manual entry with shipment→box fetch/select (supports LTL lump-across-boxes, weight-apportioned, equal split if no weight on file), file upload restricted to box-ID level with an explicit column-mapping confirmation step instead of blind alias guessing. Accept now actually writes `box_lm_costs.actual_amount` + REVERSED — this was previously missing entirely, which is why Shipment Lookup never reflected any LM invoice acceptance before this. Old whole-invoice accept/dispute functions retired; Review Queue's LM cards link to the Last Mile tab instead.
+**Known limitation, not fixed here**: lump-style invoices with every charge embedded in one text blob (e.g. UPS's `billed_description` field: "Fuel Surcharge: [-2.13]..." etc.) still get treated as one lump amount per box — parsing that blob into genuinely separate charge-code lines is separate, real work, not done.
