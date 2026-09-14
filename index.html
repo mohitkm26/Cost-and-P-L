@@ -175,6 +175,10 @@
         <label class="field">Backup document (optional)</label><input type="file" id="oi-backup">
         <label class="field">Cost header</label>
         <select id="oi-header"></select>
+        <div id="oi-grain-select-wrap" style="display:none;">
+          <label class="field">This header can be billed at more than one level — which does this invoice use?</label>
+          <select id="oi-grain-select"></select>
+        </div>
         <input type="hidden" id="oi-grouptype">
         <label class="field">Group key</label>
         <input type="hidden" id="oi-groupkey">
@@ -384,6 +388,16 @@ const HEADER_LABEL = {PICKUP:'Pickup',FM:'First Mile',HUB:'Hub',OC:'Origin Custo
 const HEADER_GRAIN = {PICKUP:'NODE_PERIOD',FM:'NODE_PERIOD',HUB:'NODE_PERIOD',OC:'MAWB',MM:'MAWB',DC:'MAWB',
   DESTCLEAR:'MAWB',IOR:'MAWB',OCEAN:'MAWB',TRANSSHIP:'MAWB',LM_PICKUP:'SHIPMENT',LM:'SHIPMENT',
   AGGREGATION:'SHIPMENT',INDIA_UK_MM:'MAWB'};
+// Headers with more than one legitimate grain — Pickup/First Mile can be a fixed node pool
+// OR an adhoc/courier shipment-level charge; MAWB-grain legs can occasionally be billed
+// against a single shipment instead of a consolidation. First entry is the default shown.
+const HEADER_VALID_GRAINS = {
+  PICKUP:['NODE_PERIOD','SHIPMENT'], FM:['NODE_PERIOD','SHIPMENT'], HUB:['NODE_PERIOD'],
+  OC:['MAWB','SHIPMENT'], MM:['MAWB','SHIPMENT'], DC:['MAWB','SHIPMENT'], DESTCLEAR:['MAWB','SHIPMENT'],
+  OCEAN:['MAWB','SHIPMENT'], TRANSSHIP:['MAWB'], LM_PICKUP:['SHIPMENT'], LM:['SHIPMENT'],
+  AGGREGATION:['SHIPMENT'], INDIA_UK_MM:['MAWB'], IOR:['MAWB']
+};
+const GRAIN_LABEL = {MAWB:'MAWB', SHIPMENT:'Individual Shipment', NODE_PERIOD:'Node + Period'};
 const HEADER_ORDER = ['PICKUP','FM','HUB','OC','MM','INDIA_UK_MM','DC','DESTCLEAR','IOR','LM_PICKUP','LM','AGGREGATION','TRANSSHIP','OCEAN'];
 function sortByHeaderOrder(rows, headerKey){
   return [...rows].sort((a,b)=> HEADER_ORDER.indexOf(a[headerKey]) - HEADER_ORDER.indexOf(b[headerKey]));
@@ -556,11 +570,22 @@ async function onLoggedIn(session){
 async function loadCostHeaderOptions(){
   const { data } = await sbClient.from('cost_headers').select('*').order('code');
   document.getElementById('oi-header').innerHTML = (data||[]).map(h=>`<option value="${h.code}">${h.label}</option>`).join('');
-  if(data && data.length){
-    const grain = HEADER_GRAIN[data[0].code];
-    document.getElementById('oi-grouptype').value = grain;
-    showGroupKeyPicker(grain);
+  if(data && data.length) applyHeaderGrainOptions(data[0].code);
+}
+// Shows the grain selector only when a header genuinely has more than one valid grain;
+// otherwise behaves exactly as before (silently locked to the header's single grain).
+function applyHeaderGrainOptions(header){
+  const grains = HEADER_VALID_GRAINS[header] || [HEADER_GRAIN[header]];
+  const wrap = document.getElementById('oi-grain-select-wrap');
+  if(grains.length > 1){
+    document.getElementById('oi-grain-select').innerHTML = grains.map(g=>`<option value="${g}">${GRAIN_LABEL[g]}</option>`).join('');
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
   }
+  const chosenGrain = grains[0]; // default to the header's primary/most common grain
+  document.getElementById('oi-grouptype').value = chosenGrain;
+  showGroupKeyPicker(chosenGrain);
 }
 
 /* ============================= SHIPMENT UPLOAD WITH COLUMN MAPPING ============================= */
@@ -770,6 +795,7 @@ document.getElementById('mm-file').addEventListener('change', async (e)=>{
     const HEADER_CODE_BY_LABEL = Object.fromEntries(Object.entries(HEADER_LABEL).map(([code,label])=>[normHeader(label),code]));
     const parsed = [];
     let unknownCurrency = null;
+    const grainMismatches = [];
     rows.forEach(row=>{
       const key = mawbCol && row[mawbCol] ? String(row[mawbCol]).trim() : (shipCol && row[shipCol] ? String(row[shipCol]).trim() : null);
       if(!key) return;
@@ -782,9 +808,13 @@ document.getElementById('mm-file').addEventListener('change', async (e)=>{
         const amt = aCol ? num(row[aCol]) : NaN;
         if(!rawHeader || isNaN(amt)) return;
         const code = HEADER_CODE_BY_LABEL[normHeader(rawHeader)] || (HEADER_LABEL[rawHeader.toUpperCase()]?rawHeader.toUpperCase():null);
+        if(code && HEADER_VALID_GRAINS[code] && !HEADER_VALID_GRAINS[code].includes(groupType)){
+          grainMismatches.push(`${rawHeader} can only be billed at ${HEADER_VALID_GRAINS[code].map(g=>GRAIN_LABEL[g]).join(' or ')} level — row "${key}" has it at ${GRAIN_LABEL[groupType]} level`);
+        }
         parsed.push({groupKey:key, groupType, rawHeader, code, currency, originalAmount:amt});
       });
     });
+    if(grainMismatches.length){ document.getElementById('mm-preview').innerHTML = `<div class="note err">${[...new Set(grainMismatches)].join('<br>')}</div>`; return; }
     if(unknownCurrency){ document.getElementById('mm-preview').innerHTML = `<div class="note err">No FX rate on file for currency "${unknownCurrency}" — add it under Access &amp; Thresholds → FX Rates first.</div>`; return; }
     pendingMMRows = parsed;
     await renderMMPreview();
@@ -907,7 +937,11 @@ function showGroupKeyPicker(groupType){
   if(groupType==='NODE_PERIOD') loadNodeOptions();
 }
 document.getElementById('oi-header').addEventListener('change', ()=>{
-  const grain = HEADER_GRAIN[document.getElementById('oi-header').value];
+  applyHeaderGrainOptions(document.getElementById('oi-header').value);
+  refreshInvoicePreview();
+});
+document.getElementById('oi-grain-select').addEventListener('change', ()=>{
+  const grain = document.getElementById('oi-grain-select').value;
   document.getElementById('oi-grouptype').value = grain;
   showGroupKeyPicker(grain);
   refreshInvoicePreview();
