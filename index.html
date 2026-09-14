@@ -790,7 +790,7 @@ document.getElementById('mm-file').addEventListener('change', async (e)=>{
     const shipCol = headers.find(h=>['shipment','shipment id'].includes(normHeader(h)));
     if(!mawbCol && !shipCol){ document.getElementById('mm-preview').innerHTML = '<div class="note err">File must have a column literally named MAWB or Shipment (or Shipment ID).</div>'; return; }
     const currCol = headers.find(h=>normHeader(h)==='currency');
-    const pairNums = [...new Set(headers.map(h=>{ const m=h.match(/^Header(\d+)$/i); return m?parseInt(m[1],10):null; }).filter(n=>n!=null))].sort((a,b)=>a-b);
+    const pairNums = [...new Set(headers.map(h=>{ const m=h.trim().match(/^Header(\d+)$/i); return m?parseInt(m[1],10):null; }).filter(n=>n!=null))].sort((a,b)=>a-b);
     if(!pairNums.length){ document.getElementById('mm-preview').innerHTML = '<div class="note err">No Header1/Amount1 (etc.) column pairs found — check column names exactly match Header1, Amount1, Header2, Amount2, ...</div>'; return; }
     const HEADER_CODE_BY_LABEL = Object.fromEntries(Object.entries(HEADER_LABEL).map(([code,label])=>[normHeader(label),code]));
     const parsed = [];
