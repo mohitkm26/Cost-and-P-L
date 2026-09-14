@@ -816,6 +816,14 @@ document.getElementById('mm-file').addEventListener('change', async (e)=>{
     });
     if(grainMismatches.length){ document.getElementById('mm-preview').innerHTML = `<div class="note err">${[...new Set(grainMismatches)].join('<br>')}</div>`; return; }
     if(unknownCurrency){ document.getElementById('mm-preview').innerHTML = `<div class="note err">No FX rate on file for currency "${unknownCurrency}" — add it under Access &amp; Thresholds → FX Rates first.</div>`; return; }
+    // Reject the same charge code appearing twice for the same group — that would create two
+    // competing tags fighting over one shipment_costs row (confirmed cause of a stuck-LOCKED line).
+    const seen = new Set(), dupeKeys = new Set();
+    parsed.forEach(r=>{ const k = `${r.groupType}:${r.groupKey}|${r.code}`; if(seen.has(k)) dupeKeys.add(k); seen.add(k); });
+    if(dupeKeys.size){
+      document.getElementById('mm-preview').innerHTML = `<div class="note err">The same charge code appears more than once for the same group — this would create two conflicting tags for one shipment/MAWB. Combine into a single amount per group+header before uploading: ${[...dupeKeys].map(k=>k.replace('|',' — ')).join('; ')}</div>`;
+      return;
+    }
     pendingMMRows = parsed;
     await renderMMPreview();
   }catch(err){ document.getElementById('mm-preview').innerHTML = `<div class="note err">Could not read file: ${err.message}</div>`; }
@@ -898,15 +906,23 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   }).select().single();
   if(error){ statusEl.textContent = 'Could not create invoice: '+error.message; return; }
   statusEl.textContent = `Tagging ${pendingMMRows.length} lines…`;
+  let tagsSaved = 0, firstTagError = null;
   for(const r of pendingMMRows){
     const rate = FX_RATES_CACHE[r.currency] || 1;
     const convertedAmount = r.originalAmount * rate;
-    await sbClient.from('invoice_tags').insert({
+    const { error: tagErr } = await sbClient.from('invoice_tags').insert({
       invoice_id:invRow.id, cost_header:r.code, group_type:r.groupType, group_key:r.groupKey,
       entered_amount:convertedAmount, original_currency:r.currency, original_amount:r.originalAmount, fx_rate_used:rate,
       status:'LOCKED', tagged_by:CURRENT_USER.id
     });
+    if(tagErr){ if(!firstTagError) firstTagError = tagErr.message; continue; } // keep going, but never claim success
+    tagsSaved++;
     await lockGroupCosts(r.code, r.groupType, r.groupKey, invRow.id);
+  }
+  if(tagsSaved < pendingMMRows.length){
+    statusEl.innerHTML = `<span style="color:var(--red);">Only ${tagsSaved} of ${pendingMMRows.length} lines actually saved — invoice #${invRow.id} is INCOMPLETE. First error: ${firstTagError}. Do not treat this invoice as usable — cancel it and re-upload once the underlying issue is fixed.</span>`;
+    await loadOtherInvoices(); await loadReviewQueue();
+    return;
   }
   await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, `Multi-MAWB batch: ${pendingMMRows.length} lines`);
   statusEl.textContent = `Invoice #${invRow.id} created with ${pendingMMRows.length} lines. Review each line individually under "View detail".`;
@@ -1076,10 +1092,11 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   }).select().single();
   if(invErr){ statusEl.textContent = 'Could not create invoice: '+invErr.message; return; }
 
-  await sbClient.from('invoice_tags').insert({
+  const { error: tagErr } = await sbClient.from('invoice_tags').insert({
     invoice_id: invRow.id, cost_header: header, group_type: groupType, group_key: groupKey,
     entered_amount: enteredAmt, status:'LOCKED', tagged_by: CURRENT_USER.id
   });
+  if(tagErr){ statusEl.innerHTML = `<span style="color:var(--red);">Invoice #${invRow.id} was created but tagging failed: ${tagErr.message}. This invoice is INCOMPLETE — cancel it rather than trying to use it.</span>`; await loadOtherInvoices(); await loadReviewQueue(); return; }
   await lockGroupCosts(header, groupType, groupKey, invRow.id);
   await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, null);
 
@@ -1099,7 +1116,10 @@ async function lockGroupCosts(header, groupType, groupKey, invoiceId){
 async function loadOtherInvoices(){
   const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').order('created_at', {ascending:false}).limit(30);
   const wrap = document.getElementById('oi-list');
-  const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM') || (i.invoice_tags.length && i.taxable_amount!==0));
+  // Was previously: only show if it has a non-LM tag OR (has tags AND nonzero amount) — which
+  // meant an invoice whose tag-insert silently failed (zero tags) vanished from view entirely,
+  // even though it's very much a real, broken record someone needs to see and cancel.
+  const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM') || i.taxable_amount!==0);
   if(!others.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
   wrap.innerHTML = others.map(inv=>invoiceCardHTML(inv)).join('');
   wireInvoiceCardActions(wrap);
@@ -1109,6 +1129,7 @@ function invoiceCardHTML(inv){
   return `<div class="invcard" data-inv="${inv.id}">
       <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code} ${inv.invoice_number||''}</div><span class="status-pill st-${(inv.status||'').toLowerCase()}">${inv.status}</span></div>
       <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''} ${tagCount>1?`· <b>${tagCount} MAWB/header lines</b> — act on each individually below`:''}</div>
+      ${tagCount===0 ? `<div class="note err">This invoice has zero tags — the line-item save likely failed during creation. It is not reconciling anything, regardless of what its status says. Cancel it and re-upload.</div>` : ''}
       <div class="meta">${(inv.invoice_tags||[]).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
       <div class="row-actions">
         <button class="btn secondary btn-sm act-view-detail">View detail</button>
@@ -1135,7 +1156,7 @@ async function toggleInvoiceDetail(invoiceId){
   }
   let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'')
     + (inv.duplicate_of_invoice_id ? `<div class="note err">Flagged as a possible duplicate of invoice #${inv.duplicate_of_invoice_id} — accepting any line below will ask you to confirm you've checked this.</div>` : '')
-    + (['DRAFT','PENDING_REVIEW'].includes(inv.status) ? `<div class="row-actions"><button class="btn red btn-sm act-cancel-invoice" data-inv="${invoiceId}">Cancel this invoice &amp; release its locks</button></div>` : '');
+    + ((['DRAFT','PENDING_REVIEW'].includes(inv.status) || tagSummaries.length===0) ? `<div class="row-actions"><button class="btn red btn-sm act-cancel-invoice" data-inv="${invoiceId}">Cancel this invoice &amp; release its locks</button></div>` : '');
   tagSummaries.forEach(t=>{
     const zeroMatch = t.summary.shipmentIds.length===0;
     html += `<div class="note" style="background:#fff;" data-tagbox="${t.tag.id}">
@@ -1179,8 +1200,9 @@ function exportTagAllocation(tagId, tagSummaries){
 }
 async function checkAndFinalizeInvoiceStatus(invoiceId){
   const { data: tags } = await sbClient.from('invoice_tags').select('status').eq('invoice_id', invoiceId);
-  const anyLocked = (tags||[]).some(t=>t.status==='LOCKED');
-  const anyDisputed = (tags||[]).some(t=>t.status==='DISPUTED');
+  if(!tags || !tags.length){ console.error(`checkAndFinalizeInvoiceStatus called for invoice ${invoiceId} with zero tags — refusing to approve an invoice with nothing behind it.`); return; }
+  const anyLocked = tags.some(t=>t.status==='LOCKED');
+  const anyDisputed = tags.some(t=>t.status==='DISPUTED');
   if(anyLocked) return; // still work to do, leave as PENDING_REVIEW
   await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
 }
@@ -1238,8 +1260,11 @@ async function disputeTag(tagId, invoiceId){
 async function cancelInvoice(invoiceId){
   if(!confirm('Cancel this invoice and release all its locks? This cannot be undone.')) return;
   const { data: tags } = await sbClient.from('invoice_tags').select('id').eq('invoice_id', invoiceId);
+  // Release shipment_costs locks unconditionally — lockGroupCosts can succeed and leave a
+  // shipment locked even when the corresponding tag insert failed, exactly like invoice #7.
+  // This must not depend on any tags actually existing.
+  await sbClient.from('shipment_costs').update({status:'OPEN', locked_by_invoice_id:null}).eq('locked_by_invoice_id', invoiceId);
   for(const t of (tags||[])){
-    await sbClient.from('shipment_costs').update({status:'OPEN', locked_by_invoice_id:null}).eq('locked_by_invoice_id', invoiceId);
     await sbClient.from('invoice_tags').update({status:'RELEASED'}).eq('id', t.id);
   }
   await sbClient.from('box_lm_costs').update({status:'OPEN', locked_by_invoice_id:null}).eq('locked_by_invoice_id', invoiceId);
