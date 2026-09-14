@@ -673,8 +673,8 @@ async function getGroupProvisionalSum(header, groupType, groupKey){
     const totalWeight = (shipRows||[]).reduce((s,r)=> s+(r.gross_weight||0), 0);
     return {sum, shipmentIds: ids, weights, totalWeight};
   }
-  if(groupType==='SHIPMENT'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('shipment_id', groupKey); return summarize(data); }
-  else if(groupType==='MAWB'){ const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('mawb', groupKey); return summarize(data); }
+  if(groupType==='SHIPMENT'){ const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('shipment_id', groupKey)); return summarize(data); }
+  else if(groupType==='MAWB'){ const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('mawb', groupKey)); return summarize(data); }
   else if(groupType==='NODE_PERIOD'){
     const [nodeRaw, periodRaw] = groupKey.split('|');
     const node = (nodeRaw||'').trim(), period = (periodRaw||'').trim();
@@ -684,7 +684,7 @@ async function getGroupProvisionalSum(header, groupType, groupKey){
     // First day of the FOLLOWING month, computed properly — not a hardcoded "-32" that
     // breaks for every month and silently returned zero shipments as if none existed.
     const endDate = new Date(Date.UTC(y, m, 1)).toISOString().slice(0,10); // JS month index m (1-based input) = next month, 0-based
-    const {data} = await sbClient.from('shipments').select('shipment_id, gross_weight').eq('node', node).gte('pickup_date', startDate).lt('pickup_date', endDate);
+    const data = await fetchAllRows('shipments','shipment_id, gross_weight', q=>q.eq('node', node).gte('pickup_date', startDate).lt('pickup_date', endDate));
     return summarize(data);
   }
   return {sum:0, shipmentIds:[], weights:{}, totalWeight:0};
