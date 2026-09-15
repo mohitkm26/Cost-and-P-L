@@ -144,6 +144,7 @@
       <p class="desc">Box-level charge-code breakdown. Matches "Last mile working". Replaces the shipment-level LM total where present.</p>
       <input type="file" id="file-boxlm" accept=".csv,.xlsx,.xls">
       <div id="boxlm-status" class="small" style="margin-top:6px;"></div>
+      <div id="boxlm-lob-panel" style="display:none;"></div>
     </div>
   </div>
 </section>
@@ -733,9 +734,11 @@ async function importShipmentsWithMapping(){
 }
 
 /* ============================= LM BOX UPLOAD ============================= */
+let pendingBoxLmRows = null, pendingBoxLmUnmatched = null, pendingBoxLmResolved = {};
 document.getElementById('file-boxlm').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   document.getElementById('boxlm-status').textContent = 'Parsing…';
+  document.getElementById('boxlm-lob-panel').style.display = 'none';
   try{
     const {rows, headers} = await parseTabularFile(file);
     const boxCol = headers.find(h=>['boxes','box id','box'].includes(normHeader(h)));
@@ -750,10 +753,59 @@ document.getElementById('file-boxlm').addEventListener('change', async (e)=>{
       const shipmentId = shipCol && row[shipCol] ? String(row[shipCol]).trim() : boxId.replace(/B\d+$/i,'');
       Object.entries(codeCols).forEach(([col,code])=>{ const v=num(row[col]); if(!isNaN(v) && v!==0) out.push({shipment_id:shipmentId, box_id:boxId, charge_code:code, amount:v, status:'OPEN'}); });
     });
-    for(const chunk of chunkArray(out,500)){ const {error} = await sbClient.from('box_lm_costs').insert(chunk); if(error){ document.getElementById('boxlm-status').textContent='Save failed: '+error.message; return; } }
-    document.getElementById('boxlm-status').textContent = `${out.length} rows saved from ${file.name}.`;
+    pendingBoxLmRows = out; pendingBoxLmResolved = {};
+    // A shipment referenced here but absent from the master usually means it was created but
+    // never properly planned, so it has no provisional cost computed — we still take the cost
+    // data (don't skip the row), but it needs a LOB or the cost has nowhere to land in P&L.
+    const distinctIds = [...new Set(out.map(r=>r.shipment_id))];
+    const found = new Set();
+    for(const chunk of chunkArray(distinctIds,200)){
+      const { data } = await sbClient.from('shipments').select('shipment_id').in('shipment_id', chunk);
+      (data||[]).forEach(r=>found.add(r.shipment_id));
+    }
+    pendingBoxLmUnmatched = distinctIds.filter(id=>!found.has(id));
+    if(pendingBoxLmUnmatched.length){
+      document.getElementById('boxlm-status').textContent = `${out.length} rows parsed. ${pendingBoxLmUnmatched.length} shipment(s) not found in the master — assign a LOB below before this can be saved.`;
+      renderBoxLmLobPanel();
+    } else {
+      document.getElementById('boxlm-status').textContent = 'Saving…';
+      await finalizeBoxLmSave(file.name);
+    }
   }catch(err){ document.getElementById('boxlm-status').textContent = 'Could not read file: '+err.message; }
 });
+function renderBoxLmLobPanel(){
+  const panel = document.getElementById('boxlm-lob-panel');
+  if(!pendingBoxLmUnmatched.length){ panel.style.display = 'none'; finalizeBoxLmSave(); return; }
+  panel.style.display = 'block';
+  panel.innerHTML = `<div class="note warn">
+    <b>${pendingBoxLmUnmatched.length} shipment(s) not in the master.</b> Select a batch below, assign the LOB their cost should land in, and repeat until all are assigned.
+    <label style="display:block;margin-top:6px;"><input type="checkbox" id="boxlm-select-all"> Select all</label>
+    <div style="max-height:180px;overflow:auto;margin:6px 0;">${pendingBoxLmUnmatched.map(id=>`<label style="display:block;"><input type="checkbox" class="boxlm-unmatched-check" value="${id}"> ${id}</label>`).join('')}</div>
+    <div class="row-actions"><input type="text" id="boxlm-lob-input" placeholder="LOB for selected (e.g. Xindus Lite)" style="max-width:220px;"><button class="btn teal btn-sm" id="boxlm-assign-lob">Assign LOB to selected &amp; continue</button></div>
+  </div>`;
+  document.getElementById('boxlm-select-all').addEventListener('change', e=>{
+    panel.querySelectorAll('.boxlm-unmatched-check').forEach(c=>c.checked = e.target.checked);
+  });
+  document.getElementById('boxlm-assign-lob').addEventListener('click', ()=>{
+    const selected = [...panel.querySelectorAll('.boxlm-unmatched-check:checked')].map(c=>c.value);
+    const lob = document.getElementById('boxlm-lob-input').value.trim();
+    if(!selected.length || !lob){ alert('Select at least one shipment and enter a LOB.'); return; }
+    selected.forEach(id=>{ pendingBoxLmResolved[id] = lob; });
+    pendingBoxLmUnmatched = pendingBoxLmUnmatched.filter(id=>!selected.includes(id));
+    renderBoxLmLobPanel();
+  });
+}
+async function finalizeBoxLmSave(fileName){
+  document.getElementById('boxlm-lob-panel').style.display = 'none';
+  const placeholders = Object.entries(pendingBoxLmResolved).map(([shipment_id,lob])=>({shipment_id, lob}));
+  if(placeholders.length){
+    const { error: phErr } = await sbClient.from('shipments').insert(placeholders);
+    if(phErr){ document.getElementById('boxlm-status').textContent = 'Could not create placeholder shipment records: '+phErr.message; return; }
+  }
+  for(const chunk of chunkArray(pendingBoxLmRows,500)){ const {error} = await sbClient.from('box_lm_costs').insert(chunk); if(error){ document.getElementById('boxlm-status').textContent='Save failed: '+error.message; return; } }
+  document.getElementById('boxlm-status').textContent = `${pendingBoxLmRows.length} rows saved${fileName?` from ${fileName}`:''}.${placeholders.length?` ${placeholders.length} placeholder shipment(s) created for unplanned shipments.`:''}`;
+  pendingBoxLmRows = null; pendingBoxLmUnmatched = null; pendingBoxLmResolved = {};
+}
 
 /* ============================= CHARGE CODE MASTER ============================= */
 async function loadChargeCodes(){
