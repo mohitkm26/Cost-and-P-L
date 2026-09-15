@@ -432,6 +432,10 @@ const LM_COL_TO_CODE = {
 
 function fmt(n){ if(n===undefined||n===null||isNaN(n)) return '—'; return Number(n).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
 function num(v){ if(v===undefined||v===null||v==='') return NaN; const s=String(v).replace(/[₹,\s]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:n; }
+// Currency math needs 2 decimal places, not raw floating-point — originalAmount * rate can
+// easily produce 3+ decimals even from clean inputs, which then made a "must match exactly"
+// sum-check nearly impossible to satisfy (e.g. showing 757519.092 instead of 757519.09).
+function round2(x){ return Math.round((x + Number.EPSILON) * 100) / 100; }
 function normHeader(h){ return String(h||'').trim().toLowerCase(); }
 // A box ID always ends in "B" + digits (e.g. X000862347B1) — used to tell whether a typed
 // or file-provided reference is a box (belongs to a shipment) or a bare shipment ID.
@@ -898,7 +902,7 @@ async function renderMMPreview(){
   const unknownCodes = [...new Set(pendingMMRows.filter(r=>!r.code).map(r=>r.rawHeader))];
   // Preview-time conversion — uses current rates; the actual invoice locks whatever rate is
   // current at the moment "Create & tag" is clicked, which may be a few seconds later.
-  const fileSumINR = pendingMMRows.reduce((s,r)=> s + r.originalAmount * (FX_RATES_CACHE[r.currency]||1), 0);
+  const fileSumINR = pendingMMRows.reduce((s,r)=> s + round2(r.originalAmount * (FX_RATES_CACHE[r.currency]||1)), 0);
   const groupCount = new Set(pendingMMRows.map(r=>r.groupType+':'+r.groupKey)).size;
   const currenciesUsed = [...new Set(pendingMMRows.map(r=>r.currency))];
   let html = `<div class="ledgerstrip">
@@ -973,7 +977,7 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   let tagsSaved = 0, firstTagError = null;
   for(const r of pendingMMRows){
     const rate = FX_RATES_CACHE[r.currency] || 1;
-    const convertedAmount = r.originalAmount * rate;
+    const convertedAmount = round2(r.originalAmount * rate);
     const { error: tagErr } = await sbClient.from('invoice_tags').insert({
       invoice_id:invRow.id, cost_header:r.code, group_type:r.groupType, group_key:r.groupKey,
       entered_amount:convertedAmount, original_currency:r.currency, original_amount:r.originalAmount, fx_rate_used:rate,
@@ -1519,7 +1523,7 @@ function wireLMBatchCardActions(wrap){
     if(!shipmentId || !selectedBoxes.length || !chargeCode || isNaN(amount)){ alert('Shipment ID, at least one box, charge code, and amount are all required.'); return; }
     await loadFXRates();
     if(currency!=='INR' && FX_RATES_CACHE[currency]==null){ alert(`No FX rate on file for "${currency}" — add it under Access & Thresholds → FX Rates first.`); return; }
-    const rate = FX_RATES_CACHE[currency]||1, convertedAmount = amount*rate;
+    const rate = FX_RATES_CACHE[currency]||1, convertedAmount = round2(amount*rate);
     const { error } = await sbClient.from('lm_invoice_tags').insert({invoice_id:invId, shipment_id:shipmentId, box_ids:selectedBoxes, charge_code:chargeCode, entered_amount:convertedAmount, original_currency:currency, original_amount:amount, fx_rate_used:rate, status:'LOCKED', tagged_by:CURRENT_USER.id, source:'manual'});
     if(error){ alert('Could not add line: '+error.message); return; }
     await sbClient.from('box_lm_costs').update({status:'LOCKED', locked_by_invoice_id:invId}).in('box_id', selectedBoxes).eq('charge_code', chargeCode).eq('status','OPEN');
@@ -1564,7 +1568,7 @@ function wireLMBatchCardActions(wrap){
           const d = deriveFromRef(boxId);
           const currency = currCol && row[currCol] ? String(row[currCol]).trim().toUpperCase() : 'INR';
           if(currency!=='INR' && FX_RATES_CACHE[currency]==null){ badCurrency = currency; return; }
-          const rate = FX_RATES_CACHE[currency]||1, converted = amt*rate;
+          const rate = FX_RATES_CACHE[currency]||1, converted = round2(amt*rate);
           tagRows.push({invoice_id:invId, shipment_id:d.shipmentId||boxId, box_ids:[boxId], charge_code: chargeCol&&row[chargeCol]?String(row[chargeCol]).trim():invRow.vendor_code, entered_amount:converted, original_currency:currency, original_amount:amt, fx_rate_used:rate, status:'LOCKED', tagged_by:CURRENT_USER.id, source:'file'});
           addedTotal += converted;
         });
