@@ -450,17 +450,23 @@ function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) o
 // Any "fetch the whole table" query MUST page through with .range(), or it
 // silently truncates on tables this size — this was the root cause of the
 // P&L/Aging numbers being a small fraction of the real total.
+// Pages are fetched in concurrent batches (not one at a time) — at current data
+// volumes, sequential one-page-then-wait pagination was taking long enough to
+// look like the screen had hung, when it was really just serial network latency.
 async function fetchAllRows(table, selectStr, applyFilters){
-  const PAGE = 1000;
-  let from = 0, all = [];
-  while(true){
-    let q = sbClient.from(table).select(selectStr).range(from, from+PAGE-1);
-    if(applyFilters) q = applyFilters(q);
-    const { data, error } = await q;
-    if(error){ console.error(`fetchAllRows(${table}) failed:`, error.message); break; }
-    all = all.concat(data||[]);
-    if(!data || data.length < PAGE) break;
-    from += PAGE;
+  const PAGE = 1000, CONCURRENCY = 6;
+  let all = [], from = 0, done = false;
+  while(!done){
+    const starts = Array.from({length:CONCURRENCY}, (_,i)=> from + i*PAGE);
+    const results = await Promise.all(starts.map(async (start)=>{
+      let q = sbClient.from(table).select(selectStr).range(start, start+PAGE-1);
+      if(applyFilters) q = applyFilters(q);
+      const { data, error } = await q;
+      if(error){ console.error(`fetchAllRows(${table}) failed:`, error.message); return []; }
+      return data||[];
+    }));
+    for(const data of results){ all = all.concat(data); if(data.length < PAGE) done = true; }
+    from += CONCURRENCY*PAGE;
   }
   return all;
 }
@@ -1909,8 +1915,9 @@ document.getElementById('btn-writeback').addEventListener('click', async ()=>{
 let PNL_SHIP_CACHE = new Map(), PNL_COSTS_CACHE = new Map();
 function gmPct(rev, cost){ return rev ? ((rev-cost)/rev*100) : 0; }
 async function runPnL(){
-  document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading full dataset (paginated)…</div>';
+  document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading shipments…</div>';
   const ships = await fetchAllRows('shipments', '*');
+  document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${ships.length} shipments. Loading cost data…</div>`;
   const costs = await fetchAllRows('shipment_costs', '*');
   PNL_SHIP_CACHE = new Map(ships.map(s=>[s.shipment_id, s]));
   PNL_COSTS_CACHE = new Map();
