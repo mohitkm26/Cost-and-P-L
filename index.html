@@ -453,8 +453,8 @@ function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) o
 // Pages are fetched in concurrent batches (not one at a time) — at current data
 // volumes, sequential one-page-then-wait pagination was taking long enough to
 // look like the screen had hung, when it was really just serial network latency.
-async function fetchAllRows(table, selectStr, applyFilters){
-  const PAGE = 1000, CONCURRENCY = 6;
+async function fetchAllRows(table, selectStr, applyFilters, onProgress){
+  const PAGE = 1000, CONCURRENCY = 10;
   let all = [], from = 0, done = false;
   while(!done){
     const starts = Array.from({length:CONCURRENCY}, (_,i)=> from + i*PAGE);
@@ -467,6 +467,7 @@ async function fetchAllRows(table, selectStr, applyFilters){
     }));
     for(const data of results){ all = all.concat(data); if(data.length < PAGE) done = true; }
     from += CONCURRENCY*PAGE;
+    if(onProgress) onProgress(all.length);
   }
   return all;
 }
@@ -1916,9 +1917,11 @@ let PNL_SHIP_CACHE = new Map(), PNL_COSTS_CACHE = new Map();
 function gmPct(rev, cost){ return rev ? ((rev-cost)/rev*100) : 0; }
 async function runPnL(){
   document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading shipments…</div>';
-  const ships = await fetchAllRows('shipments', '*');
+  const ships = await fetchAllRows('shipments', 'shipment_id, lob, revenue_amount, mawb, node, pickup_date, gross_weight, revenue_currency, shipment_status',
+    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading shipments… ${n} so far</div>`; });
   document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${ships.length} shipments. Loading cost data…</div>`;
-  const costs = await fetchAllRows('shipment_costs', '*');
+  const costs = await fetchAllRows('shipment_costs', 'shipment_id, cost_header, provisional_amount, actual_amount, status, locked_by_invoice_id',
+    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${ships.length} shipments. Loading cost data… ${n} so far</div>`; });
   PNL_SHIP_CACHE = new Map(ships.map(s=>[s.shipment_id, s]));
   PNL_COSTS_CACHE = new Map();
   costs.forEach(c=>{ if(!PNL_COSTS_CACHE.has(c.shipment_id)) PNL_COSTS_CACHE.set(c.shipment_id, []); PNL_COSTS_CACHE.get(c.shipment_id).push(c); });
