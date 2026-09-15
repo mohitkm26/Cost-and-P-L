@@ -454,14 +454,22 @@ function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) o
 // volumes, sequential one-page-then-wait pagination was taking long enough to
 // look like the screen had hung, when it was really just serial network latency.
 async function fetchAllRows(table, selectStr, applyFilters, onProgress){
-  const PAGE = 1000, CONCURRENCY = 10;
+  const PAGE = 1000, CONCURRENCY = 4, TIMEOUT_MS = 15000;
   let all = [], from = 0, done = false;
   while(!done){
     const starts = Array.from({length:CONCURRENCY}, (_,i)=> from + i*PAGE);
     const results = await Promise.all(starts.map(async (start)=>{
       let q = sbClient.from(table).select(selectStr).range(start, start+PAGE-1);
       if(applyFilters) q = applyFilters(q);
-      const { data, error } = await q;
+      // A hung request (e.g. exceeding the project's connection limit) must not block
+      // forever — race it against a timeout and retry once rather than freezing the page.
+      const runOnce = () => Promise.race([
+        q, new Promise((_,rej)=> setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))
+      ]);
+      let result;
+      try{ result = await runOnce(); }
+      catch(e){ try{ result = await runOnce(); } catch(e2){ console.error(`fetchAllRows(${table}) timed out twice at range ${start}-${start+PAGE-1}`); return []; } }
+      const { data, error } = result;
       if(error){ console.error(`fetchAllRows(${table}) failed:`, error.message); return []; }
       return data||[];
     }));
