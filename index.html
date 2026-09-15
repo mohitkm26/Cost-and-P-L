@@ -1482,20 +1482,60 @@ async function loadLMInvoiceGroups(){
         <div class="note small">Select more than one box if this is one lump charge covering several boxes of this shipment (e.g. an LTL delivery) — the amount will be split across the selected boxes by weight (or evenly if weight isn't on file).</div>
       </div>
       <div class="lm-file-mapping" id="lm-filemap-${g.id}" style="display:none;"></div>
-      ${tags.length ? `<div class="tablewrap" style="max-height:280px;"><table class="data"><thead><tr><th>Shipment</th><th>Box(es)</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th></th></tr></thead><tbody>
+      ${tags.length ? (()=>{
+        const lockedCount = tags.filter(t=>t.status==='LOCKED').length;
+        return `${lockedCount>1 ? `<div class="note" style="background:#f4f8f7;">
+          <label style="display:block;"><input type="checkbox" class="lm-select-all" data-inv="${g.id}"> <b>Select all ${lockedCount} still-open line(s)</b></label>
+          <div class="row-actions" style="margin-top:6px;">
+            <button class="btn teal btn-sm lm-bulk-accept-selected" data-inv="${g.id}">Accept selected</button>
+            <button class="btn amber btn-sm lm-bulk-dispute-selected" data-inv="${g.id}">Flag selected for dispute</button>
+            <button class="btn teal btn-sm lm-bulk-accept-all" data-inv="${g.id}">Accept entire batch (${lockedCount} lines)</button>
+          </div>
+        </div>` : ''}
+        <div class="tablewrap" style="max-height:280px;"><table class="data"><thead><tr><th></th><th>Shipment</th><th>Box(es)</th><th>Charge code</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th></th></tr></thead><tbody>
         ${tags.map(t=>{
           const prov = tagProvisional(t);
-          return `<tr><td class="mono">${t.shipment_id}</td><td class="mono small">${(t.box_ids||[]).join(', ')}</td><td>${t.charge_code}</td><td class="num">${fmt(prov)}</td><td class="num">${t.status==='REVERSED'?fmt(t.entered_amount):'—'}</td><td><span class="status-pill st-${(t.status||'').toLowerCase()}">${t.status}</span></td>
+          return `<tr><td>${t.status==='LOCKED'?`<input type="checkbox" class="lm-line-check" data-inv="${g.id}" data-tag="${t.id}">`:''}</td><td class="mono">${t.shipment_id}</td><td class="mono small">${(t.box_ids||[]).join(', ')}</td><td>${t.charge_code}</td><td class="num">${fmt(prov)}</td><td class="num">${t.status==='REVERSED'?fmt(t.entered_amount):'—'}</td><td><span class="status-pill st-${(t.status||'').toLowerCase()}">${t.status}</span></td>
           <td>${t.status==='LOCKED'?`<button class="btn teal btn-sm accept-lm-tag" data-tag="${t.id}" data-inv="${g.id}">Accept</button> <button class="btn amber btn-sm dispute-lm-tag" data-tag="${t.id}" data-inv="${g.id}">Dispute</button>`:''}</td></tr>`;
         }).join('')}
-      </tbody></table></div>` : ''}
+      </tbody></table></div>`;
+      })() : ''}
     </div>`;
   }).join('');
   wireLMBatchCardActions(wrap);
 }
+async function bulkActOnLMTags(invoiceId, tagIds, action){
+  if(!tagIds.length){ alert('Nothing selected.'); return; }
+  if(!confirm(`${action==='accept'?'Accept':'Flag for dispute'} ${tagIds.length} line(s)? This runs each one individually and cannot be undone once started.`)) return;
+  let done = 0, failed = 0;
+  for(const tagId of tagIds){
+    try{
+      if(action==='accept') await acceptLMTagSilent(tagId, invoiceId); else await disputeLMTagSilent(tagId, invoiceId);
+      done++;
+    }catch(e){ failed++; }
+  }
+  alert(`Done: ${done} succeeded${failed?`, ${failed} failed (check each line individually — likely no matching provisional record on file)`:''}.`);
+  await loadLMInvoiceGroups(); await loadReviewQueue();
+}
 function wireLMBatchCardActions(wrap){
   wrap.querySelectorAll('.accept-lm-tag').forEach(b=>b.addEventListener('click', e=> acceptLMTag(e.target.dataset.tag, e.target.dataset.inv)));
   wrap.querySelectorAll('.dispute-lm-tag').forEach(b=>b.addEventListener('click', e=> disputeLMTag(e.target.dataset.tag, e.target.dataset.inv)));
+  wrap.querySelectorAll('.lm-select-all').forEach(cb=>cb.addEventListener('change', e=>{
+    const card = e.target.closest('.invcard');
+    card.querySelectorAll('.lm-line-check').forEach(c=>c.checked = e.target.checked);
+  }));
+  wrap.querySelectorAll('.lm-bulk-accept-selected').forEach(b=>b.addEventListener('click', e=>{
+    const card = e.target.closest('.invcard');
+    bulkActOnLMTags(e.target.dataset.inv, [...card.querySelectorAll('.lm-line-check:checked')].map(c=>c.dataset.tag), 'accept');
+  }));
+  wrap.querySelectorAll('.lm-bulk-dispute-selected').forEach(b=>b.addEventListener('click', e=>{
+    const card = e.target.closest('.invcard');
+    bulkActOnLMTags(e.target.dataset.inv, [...card.querySelectorAll('.lm-line-check:checked')].map(c=>c.dataset.tag), 'dispute');
+  }));
+  wrap.querySelectorAll('.lm-bulk-accept-all').forEach(b=>b.addEventListener('click', e=>{
+    const card = e.target.closest('.invcard');
+    bulkActOnLMTags(e.target.dataset.inv, [...card.querySelectorAll('.lm-line-check')].map(c=>c.dataset.tag), 'accept');
+  }));
   wrap.querySelectorAll('.toggle-lm-manual').forEach(b=>b.addEventListener('click', e=>{
     const el = document.getElementById('lm-manual-'+e.target.dataset.inv);
     el.style.display = el.style.display==='block' ? 'none' : 'block';
@@ -1589,10 +1629,10 @@ function wireLMBatchCardActions(wrap){
     });
   });
 }
-async function acceptLMTag(tagId, invoiceId){
+async function acceptLMTagCore(tagId, invoiceId){
   const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
   const { data: boxRows } = await sbClient.from('box_lm_costs').select('*').in('box_id', tag.box_ids).eq('charge_code', tag.charge_code);
-  if(!boxRows || !boxRows.length){ alert('No provisional records found for these boxes + charge code — cannot accept. Check box_lm_costs has this box/charge combination.'); return; }
+  if(!boxRows || !boxRows.length) return {ok:false, message:'No provisional records found for these boxes + charge code — cannot accept. Check box_lm_costs has this exact box/charge combination.'};
   const provTotal = boxRows.reduce((s,r)=>s+(r.amount||0),0);
   const variance = tag.entered_amount - provTotal;
   const totalW = boxRows.reduce((s,r)=>s+(r.weight_used||0),0);
@@ -1600,25 +1640,45 @@ async function acceptLMTag(tagId, invoiceId){
     const share = totalW>0 ? (r.weight_used||0)/totalW : 1/boxRows.length;
     const boxActual = (r.amount||0) + share*variance;
     const { error } = await sbClient.from('box_lm_costs').update({actual_amount:boxActual, status:'REVERSED', locked_by_invoice_id:invoiceId}).eq('id', r.id);
-    if(error){ alert(`Accept failed writing box ${r.box_id}: ${error.message}. Nothing further was written for this line — safe to retry.`); return; }
+    if(error) return {ok:false, message:`Failed writing box ${r.box_id}: ${error.message}. Nothing further was written for this line — safe to retry.`};
   }
   const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
-  if(tagErr){ alert('Boxes were updated, but marking this line as done failed: '+tagErr.message+'. Please retry.'); return; }
+  if(tagErr) return {ok:false, message:'Boxes were updated, but marking this line as done failed: '+tagErr.message};
   await logAction(invoiceId, 'LM_LINE_ACCEPTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id} (${tag.box_ids.length} box${tag.box_ids.length>1?'es':''})`);
   await checkAndFinalizeLMInvoiceStatus(invoiceId);
+  return {ok:true};
+}
+async function disputeLMTagCore(tagId, invoiceId, disputeTextOverride){
+  const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
+  const text = disputeTextOverride!=null ? disputeTextOverride : `Actual ${fmt(tag.entered_amount)} for ${tag.charge_code} on shipment ${tag.shipment_id} (box(es): ${tag.box_ids.join(', ')}) — please confirm before this is accepted.`;
+  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[LM ${tag.shipment_id} · ${tag.charge_code}] ${text}`, raised_by:CURRENT_USER.id});
+  if(dErr) return {ok:false, message:'Could not raise dispute: '+dErr.message};
+  const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
+  if(tagErr) return {ok:false, message:'Dispute recorded, but marking the line failed: '+tagErr.message};
+  await logAction(invoiceId, 'LM_LINE_DISPUTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id}`);
+  await checkAndFinalizeLMInvoiceStatus(invoiceId);
+  return {ok:true};
+}
+async function acceptLMTag(tagId, invoiceId){
+  const result = await acceptLMTagCore(tagId, invoiceId);
+  if(!result.ok){ alert(result.message); return; }
   await loadLMInvoiceGroups(); await loadReviewQueue();
 }
 async function disputeLMTag(tagId, invoiceId){
   const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
   const text = prompt('Dispute text for this line:', `Actual ${fmt(tag.entered_amount)} for ${tag.charge_code} on shipment ${tag.shipment_id} (box(es): ${tag.box_ids.join(', ')}) — please confirm before this is accepted.`);
   if(text===null) return;
-  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[LM ${tag.shipment_id} · ${tag.charge_code}] ${text}`, raised_by:CURRENT_USER.id});
-  if(dErr){ alert('Could not raise dispute: '+dErr.message); return; }
-  const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
-  if(tagErr){ alert('Dispute recorded, but marking the line failed: '+tagErr.message); return; }
-  await logAction(invoiceId, 'LM_LINE_DISPUTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id}`);
-  await checkAndFinalizeLMInvoiceStatus(invoiceId);
+  const result = await disputeLMTagCore(tagId, invoiceId, text);
+  if(!result.ok){ alert(result.message); return; }
   await loadLMInvoiceGroups(); await loadDisputes(); await loadReviewQueue();
+}
+async function acceptLMTagSilent(tagId, invoiceId){
+  const result = await acceptLMTagCore(tagId, invoiceId);
+  if(!result.ok) throw new Error(result.message);
+}
+async function disputeLMTagSilent(tagId, invoiceId){
+  const result = await disputeLMTagCore(tagId, invoiceId, null);
+  if(!result.ok) throw new Error(result.message);
 }
 async function checkAndFinalizeLMInvoiceStatus(invoiceId){
   const { data: tags } = await sbClient.from('lm_invoice_tags').select('status').eq('invoice_id', invoiceId);
