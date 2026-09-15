@@ -634,7 +634,7 @@ const SYSTEM_FIELDS = [
   {key:'shipment_id', label:'Shipment ID'}, {key:'lob', label:'LOB'}, {key:'node', label:'Node'},
   {key:'pickup_date', label:'Pickup Date'}, {key:'mawb', label:'MAWB'}, {key:'gross_weight', label:'Gross Weight'},
   {key:'revenue_amount', label:'Revenue Amount'}, {key:'revenue_currency', label:'Revenue Currency'},
-  {key:'IGNORE', label:'— ignore —'},
+  {key:'IGNORE', label:'— ignore —'}, {key:'ATTRIBUTE', label:'— map to attribute —'},
   {key:'H:PICKUP', label:'Cost: Pickup'}, {key:'H:FM', label:'Cost: First Mile'}, {key:'H:HUB', label:'Cost: Hub'},
   {key:'H:OC', label:'Cost: Origin Customs'}, {key:'H:MM', label:'Cost: Middle Mile'}, {key:'H:DC', label:'Cost: Destination Handling'},
   {key:'H:DESTCLEAR', label:'Cost: Destination Clearance'}, {key:'H:IOR', label:'Cost: IOR'}, {key:'H:OCEAN', label:'Cost: Ocean'},
@@ -655,7 +655,7 @@ let pendingShipParsed = null, pendingShipMapping = {};
 document.getElementById('file-ship').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   document.getElementById('ship-status').textContent = 'Parsing…';
-  try{ pendingShipParsed = await pickHeaderRowThenParsePositional(file); openColumnMapModal(); }
+  try{ pendingShipParsed = await pickHeaderRowThenParsePositional(file); await openColumnMapModal(); }
   catch(err){ document.getElementById('ship-status').textContent = 'Could not read file: '+err.message; }
 });
 function guessFieldForColumn(header){
@@ -664,7 +664,13 @@ function guessFieldForColumn(header){
   for(const key in FIELD_GUESS){ if(h.includes(key) || key.includes(h)) return FIELD_GUESS[key]; }
   return 'IGNORE';
 }
-function openColumnMapModal(){
+let KNOWN_ATTRIBUTE_NAMES = [];
+async function loadKnownAttributeNames(){
+  const { data } = await sbClient.from('shipment_attributes').select('attribute_name');
+  KNOWN_ATTRIBUTE_NAMES = [...new Set((data||[]).map(r=>r.attribute_name))].sort();
+}
+async function openColumnMapModal(){
+  await loadKnownAttributeNames();
   const tb = document.querySelector('#colmap-table tbody'); tb.innerHTML='';
   const sampleRow = pendingShipParsed.rows[0] || [];
   let unguessedCount = 0;
@@ -674,29 +680,50 @@ function openColumnMapModal(){
     if(guessKey==='IGNORE') unguessedCount++;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><b>${h}</b>${isDup?' <span class="small" style="color:var(--red);">(repeated name — col '+(idx+1)+')</span>':''}<br><span class="small">${String(sampleRow[idx]).slice(0,40)}</span></td>
-      <td><select data-col-idx="${idx}" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select></td>`;
+      <td><select data-col-idx="${idx}" class="colmap-field-select" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select>
+      <input type="text" class="colmap-attr-name" data-col-idx="${idx}" list="attr-name-list" placeholder="Attribute name (e.g. Product, Country)" style="display:none;margin-top:4px;"></td>`;
     tb.appendChild(tr);
+  });
+  if(!document.getElementById('attr-name-list')){
+    const dl = document.createElement('datalist'); dl.id = 'attr-name-list';
+    document.body.appendChild(dl);
+  }
+  document.getElementById('attr-name-list').innerHTML = KNOWN_ATTRIBUTE_NAMES.map(n=>`<option value="${n}">`).join('');
+  document.querySelectorAll('.colmap-field-select').forEach(sel=>{
+    const attrInput = sel.parentElement.querySelector('.colmap-attr-name');
+    attrInput.style.display = sel.value==='ATTRIBUTE' ? 'block' : 'none';
+    sel.addEventListener('change', ()=>{ attrInput.style.display = sel.value==='ATTRIBUTE' ? 'block' : 'none'; });
   });
   document.querySelectorAll('#colmap-modal p.small').forEach(p=>p.remove());
   const p = document.createElement('p'); p.className='small';
-  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed. Teal = confirm, amber = your call.`;
+  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed. Teal = confirm, amber = your call. Pick "— map to attribute —" for a field like Product or Country that isn't a fixed system field — name it once and it's reusable on future uploads.`;
   document.querySelector('#colmap-modal h3').after(p);
   document.getElementById('colmap-modal').classList.add('open');
 }
 document.getElementById('colmap-close').addEventListener('click', ()=> document.getElementById('colmap-modal').classList.remove('open'));
 document.getElementById('colmap-confirm').addEventListener('click', async ()=>{
-  pendingShipMapping = {};
-  document.querySelectorAll('#colmap-table select').forEach(s=>{ pendingShipMapping[s.dataset.colIdx] = s.value; });
+  pendingShipMapping = {}; pendingShipAttrNames = {};
+  let missingAttrName = false;
+  document.querySelectorAll('.colmap-field-select').forEach(s=>{
+    pendingShipMapping[s.dataset.colIdx] = s.value;
+    if(s.value==='ATTRIBUTE'){
+      const name = s.parentElement.querySelector('.colmap-attr-name').value.trim();
+      if(!name){ missingAttrName = true; return; }
+      pendingShipAttrNames[s.dataset.colIdx] = name;
+    }
+  });
+  if(missingAttrName){ alert('Every column mapped to "— map to attribute —" needs a name typed in.'); return; }
   document.getElementById('colmap-modal').classList.remove('open');
   await importShipmentsWithMapping();
 });
+let pendingShipAttrNames = {};
 async function importShipmentsWithMapping(){
   const rows = pendingShipParsed.rows;
-  const shipmentMap = new Map(), costMap = new Map();
+  const shipmentMap = new Map(), costMap = new Map(), attrMap = new Map();
   let dupCount = 0;
   rows.forEach(row=>{
     let shipmentId=null, lob=null, node=null, pickupDate=null, mawb=null, grossWeight=null, revenue=null, revCcy='INR';
-    const costs = {};
+    const costs = {}; const attrs = {};
     for(const idxStr in pendingShipMapping){
       const idx = parseInt(idxStr, 10); const field = pendingShipMapping[idxStr]; const val = row[idx];
       if(field==='IGNORE') continue;
@@ -708,6 +735,7 @@ async function importShipmentsWithMapping(){
       else if(field==='gross_weight') grossWeight = num(val);
       else if(field==='revenue_amount') revenue = num(val);
       else if(field==='revenue_currency') revCcy = val || 'INR';
+      else if(field==='ATTRIBUTE'){ const name = pendingShipAttrNames[idxStr]; if(name && val!=null && val!=='') attrs[name] = String(val).trim(); }
       else if(field.startsWith('H:')){ const code = field.slice(2); const v = num(val); if(!isNaN(v)) costs[code]=v; }
     }
     if(!shipmentId) return;
@@ -715,8 +743,9 @@ async function importShipmentsWithMapping(){
     shipmentMap.set(shipmentId, {shipment_id:shipmentId, lob, node, pickup_date: toISODate(pickupDate),
       mawb, gross_weight: isNaN(grossWeight)?null:grossWeight, revenue_amount: isNaN(revenue)?null:revenue, revenue_currency: revCcy});
     Object.entries(costs).forEach(([code,amt])=> costMap.set(`${shipmentId}|${code}`, {shipment_id:shipmentId, cost_header:code, provisional_amount:amt}));
+    Object.entries(attrs).forEach(([name,value])=> attrMap.set(`${shipmentId}|${name}`, {shipment_id:shipmentId, attribute_name:name, value}));
   });
-  const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()];
+  const shipmentRows = [...shipmentMap.values()], costRows = [...costMap.values()], attrRows = [...attrMap.values()];
   document.getElementById('ship-status').textContent = `Saving ${shipmentRows.length} shipments…` + (dupCount?` (${dupCount} duplicate IDs — kept last)`:'');
   let savedShip = 0, failedShipChunks = 0;
   for(const chunk of chunkArray(shipmentRows,500)){
@@ -734,10 +763,17 @@ async function importShipmentsWithMapping(){
     if(error){ failedCostChunks++; console.error('Cost chunk failed:', error.message, chunk[0]); continue; }
     savedCost += chunk.length;
   }
+  let savedAttrs = 0, failedAttrChunks = 0;
+  for(const chunk of chunkArray(attrRows,500)){
+    const { error } = await sbClient.from('shipment_attributes').upsert(chunk, {onConflict:'shipment_id,attribute_name'});
+    if(error){ failedAttrChunks++; console.error('Attribute chunk failed:', error.message, chunk[0]); continue; }
+    savedAttrs += chunk.length;
+  }
   document.getElementById('ship-status').textContent =
-    `${savedShip} of ${shipmentRows.length} shipments saved, ${savedCost} of ${costRows.length - skippedCostRows} eligible cost lines saved.` +
+    `${savedShip} of ${shipmentRows.length} shipments saved, ${savedCost} of ${costRows.length - skippedCostRows} eligible cost lines saved` +
+    (attrRows.length ? `, ${savedAttrs} of ${attrRows.length} attribute values saved` : '') + `.` +
     (skippedCostRows ? ` ${skippedCostRows} skipped — already locked/reversed.` : '') +
-    (failedShipChunks || failedCostChunks ? ` ${failedShipChunks+failedCostChunks} batch(es) failed — check console.` : '');
+    (failedShipChunks || failedCostChunks || failedAttrChunks ? ` ${failedShipChunks+failedCostChunks+failedAttrChunks} batch(es) failed — check console.` : '');
 }
 
 /* ============================= LM BOX UPLOAD ============================= */
@@ -1837,6 +1873,8 @@ async function runShipmentLookup(){
   const { data: costsRaw } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid);
   const costs = sortByHeaderOrder(costsRaw||[], 'cost_header');
   const { data: boxes } = await sbClient.from('box_lm_costs').select('*').eq('shipment_id', sid);
+  const { data: attrRows } = await sbClient.from('shipment_attributes').select('attribute_name, value').eq('shipment_id', sid);
+  const attrLine = (attrRows||[]).length ? ` · ${attrRows.map(a=>`${a.attribute_name}: ${a.value}`).join(' · ')}` : '';
   const totalProv = costs.reduce((s,c)=>s+(c.provisional_amount||0),0);
   const totalAct = costs.reduce((s,c)=>s+(c.actual_amount!=null?c.actual_amount:c.provisional_amount),0);
   const revenue = ship.revenue_amount||0;
@@ -1853,7 +1891,7 @@ async function runShipmentLookup(){
     <div class="cell"><div class="lab">Provisional GM%</div><div class="val">${gmPct(revenue,totalProv).toFixed(1)}%</div></div>
     <div class="cell"><div class="lab">Actual GM%</div><div class="val">${gmPct(revenue,totalAct).toFixed(1)}%</div></div>
   </div>
-  <div class="small">MAWB: ${ship.mawb||'—'} · Node: ${ship.node||'—'} · Pickup: ${ship.pickup_date||'—'} · Weight: ${fmt(ship.gross_weight)} kg</div>
+  <div class="small">MAWB: ${ship.mawb||'—'} · Node: ${ship.node||'—'} · Pickup: ${ship.pickup_date||'—'} · Weight: ${fmt(ship.gross_weight)} kg${attrLine}</div>
   <div class="tablewrap"><table class="data"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th>Invoice</th></tr></thead><tbody>`;
   costs.forEach(c=>{
     let invCell = '';
@@ -1981,10 +2019,12 @@ async function togglePnLDrill(sid){
   const ship = PNL_SHIP_CACHE.get(sid);
   const legs = PNL_COSTS_CACHE.get(sid) || [];
   const { data: invLines } = await sbClient.from('invoice_tags').select('*, invoices(vendor_code, invoice_number, status)').or(`group_key.eq.${ship.mawb||'—'},group_key.eq.${sid}`);
+  const { data: attrRows } = await sbClient.from('shipment_attributes').select('attribute_name, value').eq('shipment_id', sid);
+  const attrLine = (attrRows||[]).length ? ` · ${attrRows.map(a=>`${a.attribute_name}: ${a.value}`).join(' · ')}` : '';
   const sortedLegs = sortByHeaderOrder(legs, 'cost_header');
   const invByHeader = {}; (invLines||[]).forEach(t=> invByHeader[t.cost_header] = t);
   let html = `<div class="detail-box">
-    <div class="small"><b>Shipment master fields:</b> Node: ${ship.node||'—'} · MAWB: ${ship.mawb||'—'} · Pickup: ${ship.pickup_date||'—'} · Gross weight: ${fmt(ship.gross_weight)} kg · Revenue currency: ${ship.revenue_currency||'—'} · Status: ${ship.shipment_status||'—'}</div>
+    <div class="small"><b>Shipment master fields:</b> Node: ${ship.node||'—'} · MAWB: ${ship.mawb||'—'} · Pickup: ${ship.pickup_date||'—'} · Gross weight: ${fmt(ship.gross_weight)} kg · Revenue currency: ${ship.revenue_currency||'—'} · Status: ${ship.shipment_status||'—'}${attrLine}</div>
     <h3 style="margin-top:10px;">1. Cost by header — provisional vs. actual</h3>
     <table class="data"><thead><tr><th>Header</th><th class="num">Provisional</th><th class="num">Actual</th><th>Status</th><th>Invoice</th></tr></thead><tbody>`;
   sortedLegs.forEach(c=>{
