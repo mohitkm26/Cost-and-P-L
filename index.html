@@ -1218,12 +1218,25 @@ async function toggleInvoiceDetail(invoiceId){
   if(inv.source_file_path){
     try{ const {data} = await sbClient.storage.from('invoice-documents').createSignedUrl(inv.source_file_path, 3600); if(data?.signedUrl) docLink = `<a href="${data.signedUrl}" target="_blank" class="small">Open source document</a><br>`; }catch(e){}
   }
+  const lockedTags = tagSummaries.filter(t=>t.tag.status==='LOCKED');
+  const acceptableCount = lockedTags.filter(t=>t.summary.shipmentIds.length>0).length;
   let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'')
     + (inv.duplicate_of_invoice_id ? `<div class="note err">Flagged as a possible duplicate of invoice #${inv.duplicate_of_invoice_id} — accepting any line below will ask you to confirm you've checked this.</div>` : '')
     + ((['DRAFT','PENDING_REVIEW'].includes(inv.status) || tagSummaries.length===0) ? `<div class="row-actions"><button class="btn red btn-sm act-cancel-invoice" data-inv="${invoiceId}">Cancel this invoice &amp; release its locks</button></div>` : '');
+  if(lockedTags.length>1){
+    html += `<div class="note" style="background:#f4f8f7;">
+      <label style="display:block;"><input type="checkbox" id="bulk-select-all-${invoiceId}"> <b>Select all ${lockedTags.length} still-open line(s)</b></label>
+      <div class="row-actions" style="margin-top:6px;">
+        <button class="btn teal btn-sm bulk-accept-selected" data-inv="${invoiceId}">Accept selected</button>
+        <button class="btn amber btn-sm bulk-dispute-selected" data-inv="${invoiceId}">Flag selected for dispute</button>
+        <button class="btn teal btn-sm bulk-accept-invoice" data-inv="${invoiceId}">Accept entire invoice (${acceptableCount} clean line${acceptableCount===1?'':'s'}${acceptableCount<lockedTags.length?`, skips ${lockedTags.length-acceptableCount} with zero matches`:''})</button>
+      </div>
+    </div>`;
+  }
   tagSummaries.forEach(t=>{
     const zeroMatch = t.summary.shipmentIds.length===0;
     html += `<div class="note" style="background:#fff;" data-tagbox="${t.tag.id}">
+      ${t.tag.status==='LOCKED' ? `<input type="checkbox" class="bulk-line-check" data-tag="${t.tag.id}" style="float:right;">` : ''}
       <b>${HEADER_LABEL[t.tag.cost_header]||t.tag.cost_header}</b> · ${t.tag.group_type}:${t.tag.group_key} — ${t.summary.shipmentIds.length} shipment(s), ${fmt(t.totalW)} kg
       <span class="status-pill st-${(t.tag.status||'').toLowerCase()}">${t.tag.status}</span><br>
       ${t.tag.original_currency && t.tag.original_currency!=='INR' ? `Original: ${fmt(t.tag.original_amount)} ${t.tag.original_currency} @ ${t.tag.fx_rate_used} = ` : ''}
@@ -1241,6 +1254,33 @@ async function toggleInvoiceDetail(invoiceId){
   slot.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, invoiceId)));
   slot.querySelectorAll('.act-export-alloc').forEach(b=>b.addEventListener('click', e=> exportTagAllocation(e.target.dataset.tag, DETAIL_SNAPSHOT_CACHE[invoiceId])));
   slot.querySelectorAll('.act-cancel-invoice').forEach(b=>b.addEventListener('click', e=> cancelInvoice(e.target.dataset.inv)));
+  const selectAllBox = document.getElementById(`bulk-select-all-${invoiceId}`);
+  if(selectAllBox) selectAllBox.addEventListener('change', e=>{ slot.querySelectorAll('.bulk-line-check').forEach(c=>c.checked = e.target.checked); });
+  const bulkAccept = slot.querySelector('.bulk-accept-selected');
+  if(bulkAccept) bulkAccept.addEventListener('click', ()=> bulkActOnTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>c.dataset.tag), 'accept'));
+  const bulkDispute = slot.querySelector('.bulk-dispute-selected');
+  if(bulkDispute) bulkDispute.addEventListener('click', ()=> bulkActOnTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>c.dataset.tag), 'dispute'));
+  const bulkAll = slot.querySelector('.bulk-accept-invoice');
+  if(bulkAll) bulkAll.addEventListener('click', ()=> bulkActOnTags(invoiceId, lockedTags.filter(t=>t.summary.shipmentIds.length>0).map(t=>String(t.tag.id)), 'accept'));
+}
+// Runs accept/dispute across many lines in one action — reuses the exact same per-tag
+// functions as the individual buttons, just sequentially, so nothing about the underlying
+// write logic (error checking, snapshot consistency, duplicate confirm) changes.
+async function bulkActOnTags(invoiceId, tagIds, action){
+  if(!tagIds.length){ alert('Nothing selected.'); return; }
+  const { data: inv } = await sbClient.from('invoices').select('duplicate_of_invoice_id').eq('id', invoiceId).single();
+  const dupeWarning = inv.duplicate_of_invoice_id ? ` This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id} — confirm you've checked that before proceeding.` : '';
+  if(!confirm(`${action==='accept'?'Accept':'Flag for dispute'} ${tagIds.length} line(s)? This runs each one individually and cannot be undone once started.${dupeWarning}`)) return;
+  let done = 0, failed = 0;
+  for(const tagId of tagIds){
+    try{
+      if(action==='accept') await acceptTagSilent(tagId, invoiceId); else await disputeTagSilent(tagId, invoiceId);
+      done++;
+    }catch(e){ failed++; }
+  }
+  alert(`Done: ${done} succeeded${failed?`, ${failed} failed (check each line individually)`:''}.`);
+  await loadOtherInvoices(); await loadReviewQueue();
+  const slot = document.getElementById('detail-'+invoiceId); if(slot){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
 }
 // Excel export: shipment-by-shipment allocation, WITH the provisional/delta comparison —
 // not just the final allocated figure. Reads from the same cached snapshot Accept uses.
@@ -1270,18 +1310,15 @@ async function checkAndFinalizeInvoiceStatus(invoiceId){
   if(anyLocked) return; // still work to do, leave as PENDING_REVIEW
   await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
 }
-async function acceptTag(tagId, invoiceId){
+// Core logic shared by the single-line buttons and the bulk (silent) path — returns
+// {ok, message} instead of alerting, so bulk operations can count successes/failures
+// without popping a dialog per line.
+async function acceptTagCore(tagId, invoiceId){
   const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  if(inv.duplicate_of_invoice_id){
-    if(!confirm(`This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id}. Have you checked it isn't a real duplicate before accepting this line?`)) return;
-  }
-  // Prefer the cached snapshot from when the detail view opened (keeps this consistent
-  // with whatever the person actually looked at / exported), fall back to a fresh
-  // computation for the quick-action button path where no detail view was ever opened.
   const cached = (DETAIL_SNAPSHOT_CACHE[invoiceId]||[]).find(x=>String(x.tag.id)===String(tagId));
   const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
   const summary = cached ? cached.summary : await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
-  if(!summary.shipmentIds.length){ alert('No shipments matched this group key — cannot accept a line with zero matches. Fix the group key or the underlying shipment data first.'); return; }
+  if(!summary.shipmentIds.length) return {ok:false, message:'No shipments matched this group key — cannot accept a line with zero matches.'};
   const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
   const variance = actual - summary.sum;
   const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
@@ -1290,34 +1327,65 @@ async function acceptTag(tagId, invoiceId){
     const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
     const shipmentActual = prov + share*variance;
     const { error: scErr } = await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
-    if(scErr){ alert(`Accept failed while writing shipment ${sid}: ${scErr.message}. Nothing further was written for this line — safe to retry.`); return; }
+    if(scErr) return {ok:false, message:`Failed writing shipment ${sid}: ${scErr.message}. Nothing further was written for this line — safe to retry.`};
   }
   const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
-  if(tagErr){ alert(`Shipment costs were updated, but marking this line as done failed: ${tagErr.message}. Please retry — re-running Accept on this line is safe, it will just recompute the same figures.`); return; }
+  if(tagErr) return {ok:false, message:`Shipment costs were updated, but marking this line as done failed: ${tagErr.message}. Re-running Accept on this line is safe, it will just recompute the same figures.`};
   await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
   await checkAndFinalizeInvoiceStatus(invoiceId);
-  delete DETAIL_SNAPSHOT_CACHE[invoiceId];
-  await loadOtherInvoices(); await loadReviewQueue();
-  const slot = document.getElementById('detail-'+invoiceId); if(slot && slot.style.display==='block'){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+  return {ok:true};
 }
-async function disputeTag(tagId, invoiceId){
+async function disputeTagCore(tagId, invoiceId, disputeTextOverride){
   const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
   const cached = (DETAIL_SNAPSHOT_CACHE[invoiceId]||[]).find(x=>String(x.tag.id)===String(tagId));
   const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
   const summary = cached ? cached.summary : await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
   const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+  const text = disputeTextOverride!=null ? disputeTextOverride : draftDisputeText(HEADER_LABEL[tag.cost_header]||tag.cost_header, tag.group_type, tag.group_key, summary.totalWeight, summary.shipmentIds.length, summary.sum, actual);
+  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[${tag.group_type}:${tag.group_key} · ${HEADER_LABEL[tag.cost_header]||tag.cost_header}] ${text}`, raised_by:CURRENT_USER.id});
+  if(dErr) return {ok:false, message:'Could not raise dispute: '+dErr.message};
+  const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
+  if(tagErr) return {ok:false, message:'Dispute was recorded, but marking this line as disputed failed: '+tagErr.message};
+  await logAction(invoiceId, 'LINE_DISPUTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
+  await checkAndFinalizeInvoiceStatus(invoiceId);
+  return {ok:true};
+}
+async function acceptTag(tagId, invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('duplicate_of_invoice_id').eq('id', invoiceId).single();
+  if(inv.duplicate_of_invoice_id){
+    if(!confirm(`This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id}. Have you checked it isn't a real duplicate before accepting this line?`)) return;
+  }
+  const result = await acceptTagCore(tagId, invoiceId);
+  if(!result.ok){ alert(result.message); return; }
+  delete DETAIL_SNAPSHOT_CACHE[invoiceId];
+  await loadOtherInvoices(); await loadReviewQueue();
+  const slot = document.getElementById('detail-'+invoiceId); if(slot && slot.style.display==='block'){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+}
+async function disputeTag(tagId, invoiceId){
+  const { data: tag } = await sbClient.from('invoice_tags').select('*').eq('id', tagId).single();
+  const { data: inv } = await sbClient.from('invoices').select('taxable_amount').eq('id', invoiceId).single();
+  const cached = (DETAIL_SNAPSHOT_CACHE[invoiceId]||[]).find(x=>String(x.tag.id)===String(tagId));
+  const summary = cached ? cached.summary : await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+  const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
   const draft = draftDisputeText(HEADER_LABEL[tag.cost_header]||tag.cost_header, tag.group_type, tag.group_key, summary.totalWeight, summary.shipmentIds.length, summary.sum, actual);
   const text = prompt('Dispute text for this line (edit as needed):', draft);
   if(text===null) return;
-  const { error: dErr } = await sbClient.from('disputes').insert({invoice_id:invoiceId, status:'RAISED', dispute_text:`[${tag.group_type}:${tag.group_key} · ${HEADER_LABEL[tag.cost_header]||tag.cost_header}] ${text}`, raised_by:CURRENT_USER.id});
-  if(dErr){ alert('Could not raise dispute: '+dErr.message); return; }
-  const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'DISPUTED'}).eq('id', tagId);
-  if(tagErr){ alert('Dispute was recorded, but marking this line as disputed failed: '+tagErr.message+'. Please retry.'); return; }
-  await logAction(invoiceId, 'LINE_DISPUTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
-  await checkAndFinalizeInvoiceStatus(invoiceId);
+  const result = await disputeTagCore(tagId, invoiceId, text);
+  if(!result.ok){ alert(result.message); return; }
   delete DETAIL_SNAPSHOT_CACHE[invoiceId];
   await loadOtherInvoices(); await loadDisputes(); await loadReviewQueue();
   const slot = document.getElementById('detail-'+invoiceId); if(slot && slot.style.display==='block'){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+}
+// Bulk path: no per-line duplicate confirm (asked once, up front, by bulkActOnTags) and no
+// per-line prompt for dispute text (auto-drafted instead) — throws on failure so the bulk
+// loop's try/catch can count it, rather than popping an alert per line.
+async function acceptTagSilent(tagId, invoiceId){
+  const result = await acceptTagCore(tagId, invoiceId);
+  if(!result.ok) throw new Error(result.message);
+}
+async function disputeTagSilent(tagId, invoiceId){
+  const result = await disputeTagCore(tagId, invoiceId, null);
+  if(!result.ok) throw new Error(result.message);
 }
 // Cancel a pending/draft invoice: releases every lock it's holding back to OPEN, and
 // soft-deletes the invoice (kept for audit trail, not hard-deleted).
