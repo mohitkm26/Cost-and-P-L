@@ -861,8 +861,8 @@ async function finalizeBoxLmSave(fileName){
 /* ============================= CHARGE CODE MASTER ============================= */
 async function loadChargeCodes(){
   const { data } = await sbClient.from('charge_code_master').select('*').order('charge_code');
-  const tb = document.querySelector('#charge-table tbody'); tb.innerHTML='';
-  (data||[]).forEach(c=>{ tb.innerHTML += `<tr><td class="mono">${c.charge_code}</td><td>${HEADER_LABEL[c.cost_header]||c.cost_header||''}</td><td>${c.vendor_code||''}</td><td>${c.reimbursable_default?'Yes':'No'}</td></tr>`; });
+  const tb = document.querySelector('#charge-table tbody');
+  tb.innerHTML = (data||[]).map(c=>`<tr><td class="mono">${c.charge_code}</td><td>${HEADER_LABEL[c.cost_header]||c.cost_header||''}</td><td>${c.vendor_code||''}</td><td>${c.reimbursable_default?'Yes':'No'}</td></tr>`).join('');
   if(!data || !data.length) tb.innerHTML = '<tr><td colspan="4" class="small">None yet.</td></tr>';
 }
 async function ensureVendor(code){ if(!code) return; await sbClient.from('vendors').upsert({code, name:code}, {onConflict:'code', ignoreDuplicates:true}); }
@@ -919,10 +919,8 @@ function populateMlineHeaderOptions(){
   document.getElementById('mline-header').innerHTML = document.getElementById('oi-header').innerHTML;
 }
 function renderMlineTable(){
-  const tb = document.querySelector('#mline-table tbody'); tb.innerHTML='';
-  (pendingMMRows||[]).forEach((r,i)=>{
-    tb.innerHTML += `<tr><td class="mono">${r.groupType}:${r.groupKey}</td><td>${HEADER_LABEL[r.code]||r.rawHeader}</td><td class="num">${fmt(r.originalAmount)} ${r.currency}</td><td><button class="btn secondary btn-sm rm-mline" data-i="${i}">Remove</button></td></tr>`;
-  });
+  const tb = document.querySelector('#mline-table tbody');
+  tb.innerHTML = (pendingMMRows||[]).map((r,i)=>`<tr><td class="mono">${r.groupType}:${r.groupKey}</td><td>${HEADER_LABEL[r.code]||r.rawHeader}</td><td class="num">${fmt(r.originalAmount)} ${r.currency}</td><td><button class="btn secondary btn-sm rm-mline" data-i="${i}">Remove</button></td></tr>`).join('');
   document.querySelectorAll('.rm-mline').forEach(b=>b.addEventListener('click', e=>{
     pendingMMRows.splice(parseInt(e.target.dataset.i,10),1);
     renderMMPreview();
@@ -1799,8 +1797,8 @@ document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>
     else { delta = b.actual_amount - b.amount; reason = Math.abs(delta)<=2 ? 'Matched' : (delta>0?'Rate variance — higher':'Rate variance — lower'); }
     return {...b, delta, reason};
   });
-  const tb = document.querySelector('#lm-recon-table tbody'); tb.innerHTML='';
-  results.forEach(r=> tb.innerHTML += `<tr><td class="mono">${r.shipment_id}</td><td class="mono">${r.box_id}</td><td class="mono">${r.charge_code}</td><td class="num">${fmt(r.amount)}</td><td class="num">${fmt(r.actual_amount)}</td><td class="num">${r.delta!=null?fmt(r.delta):'—'}</td><td>${r.reason}</td></tr>`);
+  const tb = document.querySelector('#lm-recon-table tbody');
+  tb.innerHTML = results.map(r=>`<tr><td class="mono">${r.shipment_id}</td><td class="mono">${r.box_id}</td><td class="mono">${r.charge_code}</td><td class="num">${fmt(r.amount)}</td><td class="num">${fmt(r.actual_amount)}</td><td class="num">${r.delta!=null?fmt(r.delta):'—'}</td><td>${r.reason}</td></tr>`).join('');
   const totalProv = results.reduce((s,r)=>s+(r.amount||0),0), totalAct = results.reduce((s,r)=>s+(r.actual_amount||0),0);
   document.getElementById('lm-recon-strip').innerHTML = `<div class="ledgerstrip"><div class="cell"><div class="lab">Provisional</div><div class="val">${fmt(totalProv)}</div></div><div class="cell"><div class="lab">Actual</div><div class="val">${fmt(totalAct)}</div></div><div class="cell"><div class="lab">Delta</div><div class="val">${fmt(totalAct-totalProv)}</div></div></div>`;
   document.getElementById('lm-recon-note').textContent = `${results.length} box/charge rows.`;
@@ -1936,11 +1934,11 @@ async function runAgingReport(){
   const tb = document.querySelector('#aging-table tbody'); tb.innerHTML='';
   if(!openCosts || !openCosts.length){ tb.innerHTML = '<tr><td colspan="5" class="small">No open provisions — either everything is invoiced/reversed, or no shipment data has been uploaded yet.</td></tr>'; return; }
   openCosts.sort((a,b)=>{ const da=a.shipments?.pickup_date||'', db=b.shipments?.pickup_date||''; return da<db?-1:1; });
-  openCosts.forEach(r=>{
+  tb.innerHTML = openCosts.map(r=>{
     const pd = r.shipments ? r.shipments.pickup_date : null;
     const days = pd ? daysBetween(pd, asof) : null;
-    tb.innerHTML += `<tr data-sid="${r.shipment_id}" data-header="${r.cost_header}"><td><input type="checkbox" class="aging-check"></td><td class="mono">${r.shipment_id}</td><td>${HEADER_LABEL[r.cost_header]||r.cost_header}</td><td class="num">${fmt(r.provisional_amount)}</td><td class="num">${days!=null?days:'—'}</td></tr>`;
-  });
+    return `<tr data-sid="${r.shipment_id}" data-header="${r.cost_header}"><td><input type="checkbox" class="aging-check"></td><td class="mono">${r.shipment_id}</td><td>${HEADER_LABEL[r.cost_header]||r.cost_header}</td><td class="num">${fmt(r.provisional_amount)}</td><td class="num">${days!=null?days:'—'}</td></tr>`;
+  }).join('');
 }
 document.getElementById('btn-run-aging').addEventListener('click', runAgingReport);
 document.getElementById('aging-select-all').addEventListener('change', e=>{ document.querySelectorAll('.aging-check').forEach(c=>c.checked = e.target.checked); });
@@ -1995,23 +1993,28 @@ async function runPnL(){
     <div class="cell"><div class="lab">Actual GM%</div><div class="val">${gmPct(totalRev,totalAct).toFixed(1)}%</div></div>
   </div>`;
 
-  const lt = document.querySelector('#pnl-lob-table tbody'); lt.innerHTML='';
-  Object.entries(byLOB).forEach(([lob,v])=>{
-    lt.innerHTML += `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.provCost)}</td>
+  const lt = document.querySelector('#pnl-lob-table tbody');
+  lt.innerHTML = Object.entries(byLOB).map(([lob,v])=>
+    `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.provCost)}</td>
       <td class="num">${gmPct(v.revenue,v.provCost).toFixed(1)}%</td><td class="num">${fmt(v.actCost)}</td>
-      <td class="num">${gmPct(v.revenue,v.actCost).toFixed(1)}%${v.flagged?` <span class="status-pill st-review" title="${v.flagged} shipment(s) still provisional on some header">${v.flagged} flagged</span>`:''}</td></tr>`;
-  });
+      <td class="num">${gmPct(v.revenue,v.actCost).toFixed(1)}%${v.flagged?` <span class="status-pill st-review" title="${v.flagged} shipment(s) still provisional on some header">${v.flagged} flagged</span>`:''}</td></tr>`
+  ).join('');
   drawPnLShipTable(shipRows);
   window._pnlRows = shipRows;
 }
+// Was `tbody.innerHTML += rowHtml` inside a loop — for 20,000+ rows that's roughly n²
+// work (every += re-serializes and re-parses the entire accumulated string), which is
+// what was actually freezing the tab, not the database. Build the full string once,
+// set innerHTML exactly once.
 function drawPnLShipTable(rows){
-  const st = document.querySelector('#pnl-ship-table tbody'); st.innerHTML='';
-  rows.forEach(r=> st.innerHTML += `<tr>
+  const st = document.querySelector('#pnl-ship-table tbody');
+  st.innerHTML = rows.map(r=> `<tr>
       <td class="mono" style="cursor:pointer;color:var(--teal);" data-drill="${r.shipment_id}">${r.shipment_id} ▾</td><td>${r.lob}</td>
       <td class="num">${fmt(r.revenue)}</td><td class="num">${fmt(r.provCost)}</td><td class="num">${r.provGM.toFixed(1)}%</td>
       <td class="num">${fmt(r.actCost)}</td><td class="num">${r.actGM.toFixed(1)}%</td>
       <td class="small">${r.flag?`<span class="status-pill st-review">${r.flag}</span>`:'Fully actualised'}</td></tr>
-      <tr class="pnl-drill" id="drill-${r.shipment_id}" style="display:none;"><td colspan="8"></td></tr>`);
+      <tr class="pnl-drill" id="drill-${r.shipment_id}" style="display:none;"><td colspan="8"></td></tr>`
+  ).join('');
   st.querySelectorAll('[data-drill]').forEach(td=>td.addEventListener('click', ()=> togglePnLDrill(td.dataset.drill)));
 }
 async function togglePnLDrill(sid){
@@ -2063,11 +2066,11 @@ document.getElementById('pnl-search').addEventListener('input', ()=>{
 /* ============================= ADMIN ============================= */
 async function loadUsersAndThresholds(){
   const { data: users } = await sbClient.from('user_profiles').select('*');
-  const ut = document.querySelector('#users-table tbody'); ut.innerHTML='';
-  (users||[]).forEach(u=> ut.innerHTML += `<tr><td class="mono">${u.user_id.slice(0,8)}…</td><td>${u.full_name||''}</td><td>${u.role}</td><td>${u.lob||''}</td></tr>`);
+  const ut = document.querySelector('#users-table tbody');
+  ut.innerHTML = (users||[]).map(u=>`<tr><td class="mono">${u.user_id.slice(0,8)}…</td><td>${u.full_name||''}</td><td>${u.role}</td><td>${u.lob||''}</td></tr>`).join('');
   const { data: th } = await sbClient.from('approval_thresholds').select('*').order('lob');
-  const tt = document.querySelector('#threshold-table tbody'); tt.innerHTML='';
-  (th||[]).forEach(t=> tt.innerHTML += `<tr><td>${t.lob}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header}</td><td class="num">${t.finance_head_pct}</td><td class="num">${fmt(t.finance_head_value)}</td><td class="num">${t.ceo_pct}</td><td class="num">${fmt(t.ceo_value)}</td></tr>`);
+  const tt = document.querySelector('#threshold-table tbody');
+  tt.innerHTML = (th||[]).map(t=>`<tr><td>${t.lob}</td><td>${HEADER_LABEL[t.cost_header]||t.cost_header}</td><td class="num">${t.finance_head_pct}</td><td class="num">${fmt(t.finance_head_value)}</td><td class="num">${t.ceo_pct}</td><td class="num">${fmt(t.ceo_value)}</td></tr>`).join('');
 }
 document.getElementById('btn-add-user').addEventListener('click', async ()=>{
   const user_id = document.getElementById('new-user-id').value.trim();
@@ -2080,8 +2083,8 @@ document.getElementById('btn-add-user').addEventListener('click', async ()=>{
 });
 async function loadFXTable(){
   const { data } = await sbClient.from('fx_rates').select('*').order('currency');
-  const tb = document.querySelector('#fx-table tbody'); tb.innerHTML='';
-  (data||[]).forEach(r=> tb.innerHTML += `<tr><td class="mono">${r.currency}</td><td class="num">${r.rate_to_inr}</td><td class="small">${r.updated_at?new Date(r.updated_at).toLocaleString():''}</td><td><button class="btn secondary btn-sm del-fx" data-cur="${r.currency}">Remove</button></td></tr>`);
+  const tb = document.querySelector('#fx-table tbody');
+  tb.innerHTML = (data||[]).map(r=>`<tr><td class="mono">${r.currency}</td><td class="num">${r.rate_to_inr}</td><td class="small">${r.updated_at?new Date(r.updated_at).toLocaleString():''}</td><td><button class="btn secondary btn-sm del-fx" data-cur="${r.currency}">Remove</button></td></tr>`).join('');
   tb.querySelectorAll('.del-fx').forEach(b=>b.addEventListener('click', async e=>{
     if(e.target.dataset.cur==="INR"){ alert("INR is the base currency and cannot be removed."); return; }
     await sbClient.from('fx_rates').delete().eq('currency', e.target.dataset.cur);
