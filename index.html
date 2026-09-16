@@ -729,6 +729,13 @@ async function importShipmentsWithMapping(){
   const rows = pendingShipParsed.rows;
   const shipmentMap = new Map(), costMap = new Map(), attrMap = new Map();
   let dupCount = 0;
+  // Only fields actually mapped in THIS file get included in each row's object below.
+  // Upsert only overwrites columns present in the payload — including a field as `null`
+  // for every row (even when the file never had that column) was silently wiping out
+  // good data on shipments already in the database whenever a later, smaller upload
+  // didn't happen to map that field. Confirmed: Revenue was getting nulled out this way
+  // by every subsequent test upload that didn't map a Revenue column.
+  const mappedFields = new Set(Object.values(pendingShipMapping));
   rows.forEach(row=>{
     let shipmentId=null, lob=null, node=null, pickupDate=null, mawb=null, grossWeight=null, revenue=null, revCcy='INR';
     const costs = {}; const attrs = {};
@@ -748,8 +755,15 @@ async function importShipmentsWithMapping(){
     }
     if(!shipmentId) return;
     if(shipmentMap.has(shipmentId)) dupCount++;
-    shipmentMap.set(shipmentId, {shipment_id:shipmentId, lob, node, pickup_date: toISODate(pickupDate),
-      mawb, gross_weight: isNaN(grossWeight)?null:grossWeight, revenue_amount: isNaN(revenue)?null:revenue, revenue_currency: revCcy});
+    const shipRow = {shipment_id:shipmentId};
+    if(mappedFields.has('lob')) shipRow.lob = lob;
+    if(mappedFields.has('node')) shipRow.node = node;
+    if(mappedFields.has('pickup_date')) shipRow.pickup_date = toISODate(pickupDate);
+    if(mappedFields.has('mawb')) shipRow.mawb = mawb;
+    if(mappedFields.has('gross_weight')) shipRow.gross_weight = isNaN(grossWeight)?null:grossWeight;
+    if(mappedFields.has('revenue_amount')) shipRow.revenue_amount = isNaN(revenue)?null:revenue;
+    if(mappedFields.has('revenue_currency')) shipRow.revenue_currency = revCcy;
+    shipmentMap.set(shipmentId, shipRow);
     Object.entries(costs).forEach(([code,amt])=> costMap.set(`${shipmentId}|${code}`, {shipment_id:shipmentId, cost_header:code, provisional_amount:amt}));
     Object.entries(attrs).forEach(([name,value])=> attrMap.set(`${shipmentId}|${name}`, {shipment_id:shipmentId, attribute_name:name, value}));
   });
