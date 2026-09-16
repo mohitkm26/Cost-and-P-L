@@ -682,6 +682,7 @@ async function openColumnMapModal(){
   const tb = document.querySelector('#colmap-table tbody'); tb.innerHTML='';
   const sampleRow = pendingShipParsed.rows[0] || [];
   let unguessedCount = 0;
+  const attrOptionsHtml = KNOWN_ATTRIBUTE_NAMES.map(n=>`<option value="${n}">${n}</option>`).join('') + `<option value="__NEW__">+ Create new attribute…</option>`;
   pendingShipParsed.headers.forEach((h, idx)=>{
     const isDup = pendingShipParsed.headers.filter(x=>x===h).length > 1;
     const guessKey = isDup ? 'IGNORE' : guessFieldForColumn(h);
@@ -689,22 +690,21 @@ async function openColumnMapModal(){
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><b>${h}</b>${isDup?' <span class="small" style="color:var(--red);">(repeated name — col '+(idx+1)+')</span>':''}<br><span class="small">${String(sampleRow[idx]).slice(0,40)}</span></td>
       <td><select data-col-idx="${idx}" class="colmap-field-select" style="${guessKey==='IGNORE'?'border-color:var(--amber);':'border-color:var(--teal);'}">${SYSTEM_FIELDS.map(f=>`<option value="${f.key}" ${f.key===guessKey?'selected':''}>${f.label}</option>`).join('')}</select>
-      <input type="text" class="colmap-attr-name" data-col-idx="${idx}" list="attr-name-list" placeholder="Attribute name (e.g. Product, Country)" style="display:none;margin-top:4px;"></td>`;
+      <select class="colmap-attr-select" data-col-idx="${idx}" style="display:none;margin-top:4px;"><option value="">— choose existing or create new —</option>${attrOptionsHtml}</select>
+      <input type="text" class="colmap-attr-name" data-col-idx="${idx}" placeholder="New attribute name" style="display:none;margin-top:4px;"></td>`;
     tb.appendChild(tr);
   });
-  if(!document.getElementById('attr-name-list')){
-    const dl = document.createElement('datalist'); dl.id = 'attr-name-list';
-    document.body.appendChild(dl);
-  }
-  document.getElementById('attr-name-list').innerHTML = KNOWN_ATTRIBUTE_NAMES.map(n=>`<option value="${n}">`).join('');
   document.querySelectorAll('.colmap-field-select').forEach(sel=>{
+    const attrSelect = sel.parentElement.querySelector('.colmap-attr-select');
     const attrInput = sel.parentElement.querySelector('.colmap-attr-name');
-    attrInput.style.display = sel.value==='ATTRIBUTE' ? 'block' : 'none';
-    sel.addEventListener('change', ()=>{ attrInput.style.display = sel.value==='ATTRIBUTE' ? 'block' : 'none'; });
+    const syncAttrVisibility = ()=>{ attrSelect.style.display = sel.value==='ATTRIBUTE' ? 'block' : 'none'; attrInput.style.display = 'none'; };
+    syncAttrVisibility();
+    sel.addEventListener('change', syncAttrVisibility);
+    attrSelect.addEventListener('change', ()=>{ attrInput.style.display = attrSelect.value==='__NEW__' ? 'block' : 'none'; });
   });
   document.querySelectorAll('#colmap-modal p.small').forEach(p=>p.remove());
   const p = document.createElement('p'); p.className='small';
-  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed. Teal = confirm, amber = your call. Pick "— map to attribute —" for a field like Product or Country that isn't a fixed system field — name it once and it's reusable on future uploads.`;
+  p.textContent = `${pendingShipParsed.headers.length - unguessedCount} of ${pendingShipParsed.headers.length} columns guessed. Teal = confirm, amber = your call. Pick "— map to attribute —" for a field like Product or Country that isn't a fixed system field — then choose an EXISTING attribute from the list (exact reuse, no typo risk) or "+ Create new attribute…" only when it's genuinely new.`;
   document.querySelector('#colmap-modal h3').after(p);
   document.getElementById('colmap-modal').classList.add('open');
 }
@@ -715,12 +715,14 @@ document.getElementById('colmap-confirm').addEventListener('click', async ()=>{
   document.querySelectorAll('.colmap-field-select').forEach(s=>{
     pendingShipMapping[s.dataset.colIdx] = s.value;
     if(s.value==='ATTRIBUTE'){
-      const name = s.parentElement.querySelector('.colmap-attr-name').value.trim();
+      const attrSelect = s.parentElement.querySelector('.colmap-attr-select');
+      let name = attrSelect.value;
+      if(name==='__NEW__') name = s.parentElement.querySelector('.colmap-attr-name').value.trim();
       if(!name){ missingAttrName = true; return; }
       pendingShipAttrNames[s.dataset.colIdx] = name;
     }
   });
-  if(missingAttrName){ alert('Every column mapped to "— map to attribute —" needs a name typed in.'); return; }
+  if(missingAttrName){ alert('Every column mapped to "— map to attribute —" needs an attribute chosen (existing) or typed (new).'); return; }
   document.getElementById('colmap-modal').classList.remove('open');
   await importShipmentsWithMapping();
 });
