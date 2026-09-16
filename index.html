@@ -1959,29 +1959,22 @@ document.getElementById('btn-writeback').addEventListener('click', async ()=>{
 });
 
 /* ============================= P&L / ACCOUNTING — LOB summary + shipment drill-down ============================= */
-let PNL_SHIP_CACHE = new Map(), PNL_COSTS_CACHE = new Map();
+let PNL_SHIP_CACHE = new Map();
 function gmPct(rev, cost){ return rev ? ((rev-cost)/rev*100) : 0; }
 async function runPnL(){
-  document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading shipments…</div>';
-  const ships = await fetchAllRows('shipments', 'shipment_id, lob, revenue_amount, mawb, node, pickup_date, gross_weight, revenue_currency, shipment_status',
-    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading shipments… ${n} so far</div>`; });
-  document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${ships.length} shipments. Loading cost data…</div>`;
-  const costs = await fetchAllRows('shipment_costs', 'shipment_id, cost_header, provisional_amount, actual_amount, status, locked_by_invoice_id',
-    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${ships.length} shipments. Loading cost data… ${n} so far</div>`; });
-  PNL_SHIP_CACHE = new Map(ships.map(s=>[s.shipment_id, s]));
-  PNL_COSTS_CACHE = new Map();
-  costs.forEach(c=>{ if(!PNL_COSTS_CACHE.has(c.shipment_id)) PNL_COSTS_CACHE.set(c.shipment_id, []); PNL_COSTS_CACHE.get(c.shipment_id).push(c); });
+  document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading P&amp;L (pre-aggregated server-side — one row per shipment, not per cost line)…</div>';
+  // Reads from the pnl_shipment_level VIEW, not raw shipment_costs — the database sums
+  // provisional/actual across every header per shipment, so the browser only ever receives
+  // one row per shipment regardless of how large shipment_costs itself has grown.
+  const viewRows = await fetchAllRows('pnl_shipment_level', '*',
+    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading P&amp;L… ${n} shipments so far</div>`; });
+  PNL_SHIP_CACHE = new Map(viewRows.map(r=>[r.shipment_id, r]));
 
-  const shipRows = ships.map(s=>{
-    const legs = PNL_COSTS_CACHE.get(s.shipment_id) || [];
-    const provCost = legs.reduce((a,c)=>a+(c.provisional_amount||0), 0);
-    const actCost = legs.reduce((a,c)=>a+(c.actual_amount!=null?c.actual_amount:c.provisional_amount), 0);
-    const allActual = legs.length>0 && legs.every(c=>c.actual_amount!=null);
-    const anyActual = legs.some(c=>c.actual_amount!=null);
-    const revenue = s.revenue_amount || 0;
-    return {shipment_id:s.shipment_id, lob:s.lob||'Unassigned', revenue, provCost, actCost,
+  const shipRows = viewRows.map(r=>{
+    const revenue = r.revenue || 0, provCost = r.prov_cost || 0, actCost = r.act_cost || 0;
+    return {shipment_id:r.shipment_id, lob:r.lob||'Unassigned', revenue, provCost, actCost,
       provGM: gmPct(revenue,provCost), actGM: gmPct(revenue,actCost),
-      flag: legs.length===0 ? 'No cost data' : (allActual ? null : 'Provisional standing in for actual on some/all headers')};
+      flag: r.header_count===0 ? 'No cost data' : (r.any_unsettled ? 'Provisional standing in for actual on some/all headers' : null)};
   });
 
   const byLOB = {};
@@ -2024,8 +2017,11 @@ async function togglePnLDrill(sid){
   const cell = row.querySelector('td');
   cell.innerHTML = '<div class="small">Loading…</div>';
   row.style.display='table-row';
-  const ship = PNL_SHIP_CACHE.get(sid);
-  const legs = PNL_COSTS_CACHE.get(sid) || [];
+  // Fetched on demand, scoped to ONE shipment — cheap regardless of how large the underlying
+  // tables are, unlike pulling the whole shipment_costs table upfront for every shipment.
+  const { data: ship } = await sbClient.from('shipments').select('*').eq('shipment_id', sid).single();
+  const { data: legsRaw } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid);
+  const legs = legsRaw||[];
   const { data: invLines } = await sbClient.from('invoice_tags').select('*, invoices(vendor_code, invoice_number, status)').or(`group_key.eq.${ship.mawb||'—'},group_key.eq.${sid}`);
   const { data: attrRows } = await sbClient.from('shipment_attributes').select('attribute_name, value').eq('shipment_id', sid);
   const attrLine = (attrRows||[]).length ? ` · ${attrRows.map(a=>`${a.attribute_name}: ${a.value}`).join(' · ')}` : '';
@@ -2043,6 +2039,7 @@ async function togglePnLDrill(sid){
       invCell = `${label} <a href="#" class="jump-invoice small" data-inv="${c.locked_by_invoice_id}">(view)</a>`;
     }
     html += `<tr><td>${HEADER_LABEL[c.cost_header]||c.cost_header}</td><td class="num">${fmt(c.provisional_amount)}</td><td class="num">${c.actual_amount!=null?fmt(c.actual_amount):'<span class="status-pill st-review">provisional standing in</span>'}</td><td><span class="status-pill st-${(c.status||'').toLowerCase()}">${c.status}</span></td><td class="small">${invCell}</td></tr>`;
+
   });
   if(!sortedLegs.length) html += `<tr><td colspan="5" class="small">No cost data for this shipment.</td></tr>`;
   html += `</tbody></table>
