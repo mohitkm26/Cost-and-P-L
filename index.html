@@ -1962,10 +1962,13 @@ document.getElementById('btn-writeback').addEventListener('click', async ()=>{
 let PNL_SHIP_CACHE = new Map();
 function gmPct(rev, cost){ return rev ? ((rev-cost)/rev*100) : 0; }
 async function runPnL(){
-  document.getElementById('pnl-strip').innerHTML = '<div class="small">Loading P&amp;L (pre-aggregated server-side — one row per shipment, not per cost line)…</div>';
-  // Reads from the pnl_shipment_level VIEW, not raw shipment_costs — the database sums
-  // provisional/actual across every header per shipment, so the browser only ever receives
-  // one row per shipment regardless of how large shipment_costs itself has grown.
+  document.getElementById('pnl-strip').innerHTML = '<div class="small">Refreshing P&amp;L (this recomputes the whole rollup server-side — may take a few seconds on a large dataset)…</div>';
+  const { error: refreshErr } = await sbClient.rpc('refresh_pnl_shipment_level');
+  if(refreshErr){ document.getElementById('pnl-strip').innerHTML = `<div class="note err">Could not refresh: ${refreshErr.message}. Showing whatever was last computed, if anything.</div>`; }
+  // Reads from the pnl_shipment_level MATERIALIZED view — a plain (non-materialized) view
+  // with GROUP BY was the earlier mistake: every paginated read re-ran the full aggregation
+  // over shipment_costs from scratch. This is pre-computed once by the refresh call above,
+  // so reading it back is as cheap as reading any ordinary table.
   const viewRows = await fetchAllRows('pnl_shipment_level', '*',
     null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading P&amp;L… ${n} shipments so far</div>`; });
   PNL_SHIP_CACHE = new Map(viewRows.map(r=>[r.shipment_id, r]));
