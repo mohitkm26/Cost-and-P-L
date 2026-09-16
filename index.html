@@ -125,6 +125,7 @@
   <button data-tab="shiplookup">Shipment Lookup</button>
   <button data-tab="aging">Aging &amp; Write-back</button>
   <button data-tab="reports">P&amp;L / Accounting</button>
+  <button data-tab="monthend">Month-End Close</button>
   <button data-tab="admin">Access &amp; Thresholds</button>
 </nav>
 
@@ -168,6 +169,7 @@
         <label class="field">Vendor code / name</label><input type="text" id="oi-vendor" placeholder="e.g. FREIGHTWINGS">
         <label class="field">Invoice number</label><input type="text" id="oi-invnum">
         <label class="field">Invoice date</label><input type="date" id="oi-date">
+        <label class="field">Entry date <span class="small">(when this should count for provision reversal — defaults to today, can be backdated)</span></label><input type="date" id="oi-entrydate">
         <label class="field">Currency</label><input type="text" id="oi-currency" value="INR">
         <label class="field">Taxable amount (GST excluded)</label><input type="number" id="oi-amount">
       </div>
@@ -215,6 +217,7 @@
         <label class="field">Vendor code / name</label><input type="text" id="mm-vendor" placeholder="e.g. IBC CUSTOMS">
         <label class="field">Invoice number</label><input type="text" id="mm-invnum">
         <label class="field">Invoice date</label><input type="date" id="mm-date">
+        <label class="field">Entry date <span class="small">(when this should count for provision reversal)</span></label><input type="date" id="mm-entrydate">
         <label class="field">Taxable amount, in INR — must equal the file's total after FX conversion, exactly</label><input type="number" id="mm-amount">
       </div>
       <div>
@@ -260,6 +263,7 @@
     <h2>New Last Mile invoice batch</h2>
     <p class="desc">Structured file upload — itemized charge-code columns, or a lump ledger keyed by box ID / tracking number. Matches against box-level provisional detail.</p>
     <label class="field">Vendor / reference</label><input type="text" id="lm-inv-name" placeholder="e.g. UPS — Aug W3">
+    <label class="field">Entry date <span class="small">(when this should count for provision reversal)</span></label><input type="date" id="lm-entrydate">
     <label class="field">Source document (mandatory)</label><input type="file" id="lm-source">
     <button class="btn secondary btn-sm" id="btn-new-lm-invgroup" style="margin-top:8px;">Create batch</button>
   </div>
@@ -347,6 +351,22 @@
 </section>
 
 <!-- ===================== ADMIN ===================== -->
+<section class="tabpanel" id="tab-monthend">
+  <div class="panel">
+    <h2>Month-End Close — Provision Roll-Forward</h2>
+    <p class="desc">Opening + New Provisions − Provisions Reversed = Closing. Booked against pickup date; reversed against each invoice's entry date, not today's date — so a reversal entered late but dated back into the prior period lands correctly.</p>
+    <div class="row-actions">
+      <label class="small">From <input type="date" id="me-from"></label>
+      <label class="small">To <input type="date" id="me-to"></label>
+      <button class="btn secondary btn-sm" id="btn-me-this-month">This month</button>
+      <button class="btn teal btn-sm" id="btn-me-run">Run</button>
+      <button class="btn secondary btn-sm" id="btn-me-export">Export shipment-level detail (Excel)</button>
+    </div>
+    <div id="me-status" class="small" style="margin-top:6px;"></div>
+    <div class="tablewrap" style="margin-top:10px;"><table class="data" id="me-table"><thead><tr><th>Cost Header</th><th class="num">Opening Balance</th><th class="num">New Provisions</th><th class="num">Invoices Booked</th><th class="num">Provisions Reversed</th><th class="num">Closing Balance</th></tr></thead><tbody></tbody></table></div>
+    <p class="small" style="margin-top:8px;">Note: this is only accurate for activity that happened after this feature shipped — earlier Accepts and uploads have no recorded event date, and will show up entirely as Opening Balance rather than New Provisions/Reversed for their true period.</p>
+  </div>
+</section>
 <section class="tabpanel" id="tab-admin">
   <div class="grid2">
     <div class="panel">
@@ -372,6 +392,17 @@
       <h2>Approval thresholds by LOB × Cost Header</h2>
       <p class="desc">Stored for when the tiered chain is re-enabled — not currently used for routing.</p>
       <div class="tablewrap" style="max-height:400px;"><table class="data" id="threshold-table"><thead><tr><th>LOB</th><th>Header</th><th class="num">FH %</th><th class="num">FH ₹</th><th class="num">CEO %</th><th class="num">CEO ₹</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h2>Period Lock</h2>
+      <p class="desc">Admin only. Locking through a date blocks any new invoice with an entry date on or before it, and makes provisional costs booked on or before that date immutable on re-upload — finalizes the roll-forward for that period instead of leaving it perpetually open. Locking never overwrites a period that was already locked further forward.</p>
+      <div id="period-lock-status" class="small"></div>
+      <div class="row-actions" style="margin-top:8px;">
+        <input type="date" id="new-lock-through">
+        <button class="btn amber btn-sm" id="btn-lock-period">Lock through this date</button>
+        <button class="btn secondary btn-sm" id="btn-unlock-period">Unlock (with reason)</button>
+      </div>
+      <div class="tablewrap" style="max-height:200px;margin-top:8px;"><table class="data" id="period-lock-log-table"><thead><tr><th>Action</th><th>Through</th><th>Reason</th><th>When</th></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="panel">
       <h2>FX Rates</h2>
@@ -622,6 +653,7 @@ async function onLoggedIn(session){
   await loadUsersAndThresholds();
   await loadFXTable();
   await loadFXRates();
+  await loadPeriodLockPanel();
 }
 (async function initAuth(){ const { data } = await sbClient.auth.getSession(); if(data.session) await onLoggedIn(data.session); })();
 
@@ -787,15 +819,48 @@ async function importShipmentsWithMapping(){
     if(error){ failedShipChunks++; console.error('Shipment chunk failed:', error.message, chunk[0]); continue; }
     savedShip += chunk.length;
   }
-  const { data: protectedRows } = await sbClient.from('shipment_costs').select('shipment_id, cost_header').neq('status','OPEN');
-  const protectedSet = new Set((protectedRows||[]).map(r=>`${r.shipment_id}|${r.cost_header}`));
-  const safeCostRows = costRows.filter(c => !protectedSet.has(`${c.shipment_id}|${c.cost_header}`));
-  const skippedCostRows = costRows.length - safeCostRows.length;
+  const { data: protectedStatusRows } = await sbClient.from('shipment_costs').select('shipment_id, cost_header').neq('status','OPEN');
+  const statusProtectedSet = new Set((protectedStatusRows||[]).map(r=>`${r.shipment_id}|${r.cost_header}`));
+  // Lock-date protection: a shipment+header whose FIRST booking predates the lock is
+  // immutable, regardless of its current status. Also tracks which combos already have
+  // ANY booked event at all, so we know which are genuinely new (write a ledger row)
+  // versus an update to something already booked (don't duplicate the ledger entry).
+  const lock = await getPeriodLock();
+  const existingBookedSet = new Set();
+  const lockProtectedSet = new Set(); // tracked separately from statusProtectedSet — different, accurate skip reasons
+  const distinctCostShipmentIds = [...new Set(costRows.map(c=>c.shipment_id))];
+  for(const chunk of chunkArray(distinctCostShipmentIds,200)){
+    const { data: bookedRows } = await sbClient.from('provision_ledger').select('shipment_id, cost_header, event_date').eq('event_type','BOOKED').in('shipment_id', chunk);
+    (bookedRows||[]).forEach(r=>{
+      const key = `${r.shipment_id}|${r.cost_header}`;
+      existingBookedSet.add(key);
+      if(lock && lock.locked_through && r.event_date <= lock.locked_through) lockProtectedSet.add(key);
+    });
+  }
+  const safeCostRows = costRows.filter(c => { const k=`${c.shipment_id}|${c.cost_header}`; return !statusProtectedSet.has(k) && !lockProtectedSet.has(k); });
+  // Two genuinely different reasons a row gets skipped — reported separately so "already
+  // locked/reversed" (an invoice claimed it) is never shown for a row that's actually still
+  // OPEN and was skipped purely because the accounting period is locked, which was wrong.
+  let skippedForStatus = 0, skippedForLock = 0;
+  costRows.forEach(c=>{ const k=`${c.shipment_id}|${c.cost_header}`; if(statusProtectedSet.has(k)) skippedForStatus++; else if(lockProtectedSet.has(k)) skippedForLock++; });
   let savedCost = 0, failedCostChunks = 0;
   for(const chunk of chunkArray(safeCostRows,500)){
     const { error } = await sbClient.from('shipment_costs').upsert(chunk.map(c=>({...c, status:'OPEN'})), {onConflict:'shipment_id,cost_header', ignoreDuplicates:false});
     if(error){ failedCostChunks++; console.error('Cost chunk failed:', error.message, chunk[0]); continue; }
     savedCost += chunk.length;
+  }
+  // Write a BOOKED ledger event only for genuinely new shipment+header combinations —
+  // re-uploading a shipment that's already booked must never duplicate its ledger entry.
+  const newlyBookedRows = safeCostRows.filter(c => !existingBookedSet.has(`${c.shipment_id}|${c.cost_header}`));
+  if(newlyBookedRows.length){
+    const distinctNewIds = [...new Set(newlyBookedRows.map(r=>r.shipment_id))];
+    const pickupMap = new Map();
+    for(const chunk of chunkArray(distinctNewIds,200)){
+      const { data: pdRows } = await sbClient.from('shipments').select('shipment_id, pickup_date').in('shipment_id', chunk);
+      (pdRows||[]).forEach(r=> pickupMap.set(r.shipment_id, r.pickup_date));
+    }
+    const ledgerRows = newlyBookedRows.map(r=>({shipment_id:r.shipment_id, cost_header:r.cost_header, event_type:'BOOKED', amount:r.provisional_amount, event_date: pickupMap.get(r.shipment_id) || todayISO()}));
+    for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
   }
   let savedAttrs = 0, failedAttrChunks = 0;
   for(const chunk of chunkArray(attrRows,500)){
@@ -803,10 +868,12 @@ async function importShipmentsWithMapping(){
     if(error){ failedAttrChunks++; console.error('Attribute chunk failed:', error.message, chunk[0]); continue; }
     savedAttrs += chunk.length;
   }
+  const skippedCostRows = skippedForStatus + skippedForLock;
   document.getElementById('ship-status').textContent =
     `${savedShip} of ${shipmentRows.length} shipments saved, ${savedCost} of ${costRows.length - skippedCostRows} eligible cost lines saved` +
     (attrRows.length ? `, ${savedAttrs} of ${attrRows.length} attribute values saved` : '') + `.` +
-    (skippedCostRows ? ` ${skippedCostRows} skipped — already locked/reversed.` : '') +
+    (skippedForStatus ? ` ${skippedForStatus} skipped — already locked/reversed by an invoice.` : '') +
+    (skippedForLock ? ` ${skippedForLock} skipped — booked in a period that's now locked (through ${lock.locked_through}).` : '') +
     (failedShipChunks || failedCostChunks || failedAttrChunks ? ` ${failedShipChunks+failedCostChunks+failedAttrChunks} batch(es) failed — check console.` : '');
 }
 
@@ -892,6 +959,23 @@ async function loadChargeCodes(){
   if(!data || !data.length) tb.innerHTML = '<tr><td colspan="4" class="small">None yet.</td></tr>';
 }
 async function ensureVendor(code){ if(!code) return; await sbClient.from('vendors').upsert({code, name:code}, {onConflict:'code', ignoreDuplicates:true}); }
+// Shared by every invoice-creation path. entry_date is a real accounting control (drives
+// both when a provision reversal is recorded AND period lock enforcement) — not optional
+// metadata, so every path checks it the same way before creating anything.
+let PERIOD_LOCK_CACHE = null;
+async function getPeriodLock(){
+  const { data } = await sbClient.from('period_lock').select('*').eq('id',1).maybeSingle();
+  PERIOD_LOCK_CACHE = data;
+  return data;
+}
+async function checkEntryDate(entryDate){
+  if(!entryDate) return {ok:false, message:'Entry date is required.'};
+  const lock = await getPeriodLock();
+  if(lock && lock.locked_through && entryDate <= lock.locked_through){
+    return {ok:false, message:`Blocked: the period through ${lock.locked_through} is locked. Entry date must be after that.`};
+  }
+  return {ok:true};
+}
 
 /* ============================= GROUP PROVISIONAL SUM (shared) ============================= */
 async function getGroupProvisionalSum(header, groupType, groupKey){
@@ -1084,11 +1168,14 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   const vendor = document.getElementById('mm-vendor').value.trim();
   const invnum = document.getElementById('mm-invnum').value.trim();
   const date = document.getElementById('mm-date').value;
+  const entryDate = document.getElementById('mm-entrydate').value;
   const amount = num(document.getElementById('mm-amount').value);
   const sourceFile = document.getElementById('mm-source').files[0];
   const backupFile = document.getElementById('mm-backup').files[0];
   const statusEl = document.getElementById('mm-status');
   if(!vendor || !sourceFile || !pendingMMRows || !pendingMMRows.length){ statusEl.textContent = 'Vendor, source document, and a valid line-item file are required.'; return; }
+  const lockCheck = await checkEntryDate(entryDate);
+  if(!lockCheck.ok){ statusEl.textContent = lockCheck.message; return; }
   await ensureVendor(vendor);
   statusEl.textContent = 'Uploading source document…';
   const sourcePath = await uploadDoc(sourceFile, 'other-header');
@@ -1096,7 +1183,7 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   if(!sourcePath){ statusEl.textContent = 'Source document upload failed.'; return; }
   await loadFXRates(); // fresh rates at the moment of creation — this is what gets locked
   const { data: invRow, error } = await sbClient.from('invoices').insert({
-    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency:'INR', taxable_amount:amount,
+    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, entry_date:entryDate, currency:'INR', taxable_amount:amount,
     source_file_path:sourcePath, backup_file_path:backupPath, status:'PENDING_REVIEW', entered_by:CURRENT_USER.id
   }).select().single();
   if(error){ statusEl.textContent = 'Could not create invoice: '+error.message; return; }
@@ -1254,6 +1341,7 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   const vendor = document.getElementById('oi-vendor').value.trim();
   const invnum = document.getElementById('oi-invnum').value.trim();
   const date = document.getElementById('oi-date').value;
+  const entryDate = document.getElementById('oi-entrydate').value;
   const currency = document.getElementById('oi-currency').value.trim() || 'INR';
   const amount = num(document.getElementById('oi-amount').value);
   const sourceFile = document.getElementById('oi-source').files[0];
@@ -1265,6 +1353,8 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   const statusEl = document.getElementById('oi-status');
 
   if(!vendor || isNaN(amount) || !sourceFile || !groupKey){ statusEl.textContent = 'Vendor, taxable amount, source document, and group key are all required.'; return; }
+  const lockCheck = await checkEntryDate(entryDate);
+  if(!lockCheck.ok){ statusEl.textContent = lockCheck.message; return; }
   statusEl.textContent = 'Checking the group key matches real shipments…';
   const precheck = await getGroupProvisionalSum(header, groupType, groupKey);
   if(!precheck.shipmentIds.length){ statusEl.textContent = `Blocked: no shipments found for ${groupType} = "${groupKey}". Fix the group key before this can be created — an invoice can't be tagged against nothing.`; return; }
@@ -1281,7 +1371,7 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   if(!sourcePath){ statusEl.textContent = 'Source document upload failed — check the invoice-documents storage bucket exists and has a policy for authenticated users.'; return; }
 
   const { data: invRow, error: invErr } = await sbClient.from('invoices').insert({
-    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, currency, taxable_amount:amount,
+    vendor_code:vendor, invoice_number:invnum, invoice_date:date||null, entry_date:entryDate, currency, taxable_amount:amount,
     source_file_path:sourcePath, backup_file_path:backupPath, status:'PENDING_REVIEW', entered_by: CURRENT_USER.id,
     duplicate_of_invoice_id: duplicateOf
   }).select().single();
@@ -1453,13 +1543,21 @@ async function acceptTagCore(tagId, invoiceId){
   const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
   const variance = actual - summary.sum;
   const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
+  // Reversal is recorded against the invoice's ENTRY DATE, not today — that's the whole
+  // point of entry date existing (lets someone book Sep 3 with an Aug 31 entry date so it
+  // falls in the August close). Falls back to invoice_date, then today, for any invoice
+  // created before this field existed.
+  const ledgerDate = inv.entry_date || inv.invoice_date || todayISO();
+  const ledgerRows = [];
   for(const sid of summary.shipmentIds){
     const prov = summary.provByShipment[sid] || 0;
     const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
     const shipmentActual = prov + share*variance;
     const { error: scErr } = await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
     if(scErr) return {ok:false, message:`Failed writing shipment ${sid}: ${scErr.message}. Nothing further was written for this line — safe to retry.`};
+    ledgerRows.push({shipment_id:sid, cost_header:tag.cost_header, event_type:'REVERSED', amount:prov, event_date:ledgerDate, related_invoice_id:invoiceId});
   }
+  for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
   const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
   if(tagErr) return {ok:false, message:`Shipment costs were updated, but marking this line as done failed: ${tagErr.message}. Re-running Accept on this line is safe, it will just recompute the same figures.`};
   await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
@@ -1557,12 +1655,15 @@ async function finalizeApproval(invoiceId){
 /* ============================= LAST MILE INVOICES ============================= */
 document.getElementById('btn-new-lm-invgroup').addEventListener('click', async ()=>{
   const name = document.getElementById('lm-inv-name').value.trim();
+  const entryDate = document.getElementById('lm-entrydate').value;
   const sourceFile = document.getElementById('lm-source').files[0];
   if(!name || !sourceFile){ alert('Name and source document are both required.'); return; }
+  const lockCheck = await checkEntryDate(entryDate);
+  if(!lockCheck.ok){ alert(lockCheck.message); return; }
   await ensureVendor(name); // invoices.vendor_code is a foreign key to vendors — must exist first
   const sourcePath = await uploadDoc(sourceFile, 'last-mile');
   const { data: invRow, error } = await sbClient.from('invoices').insert({
-    vendor_code:name, taxable_amount:0, currency:'INR', source_file_path:sourcePath, status:'DRAFT', entered_by:CURRENT_USER.id
+    vendor_code:name, taxable_amount:0, currency:'INR', entry_date:entryDate, source_file_path:sourcePath, status:'DRAFT', entered_by:CURRENT_USER.id
   }).select().single();
   if(error){ alert(error.message); return; }
   document.getElementById('lm-inv-name').value='';
@@ -1757,6 +1858,7 @@ function wireLMBatchCardActions(wrap){
   });
 }
 async function acceptLMTagCore(tagId, invoiceId){
+  const { data: inv } = await sbClient.from('invoices').select('entry_date, invoice_date').eq('id', invoiceId).single();
   const { data: tag } = await sbClient.from('lm_invoice_tags').select('*').eq('id', tagId).single();
   const { data: boxRows } = await sbClient.from('box_lm_costs').select('*').in('box_id', tag.box_ids).eq('charge_code', tag.charge_code);
   if(!boxRows || !boxRows.length) return {ok:false, message:'No provisional records found for these boxes + charge code — cannot accept. Check box_lm_costs has this exact box/charge combination.'};
@@ -1771,6 +1873,9 @@ async function acceptLMTagCore(tagId, invoiceId){
   }
   const { error: tagErr } = await sbClient.from('lm_invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
   if(tagErr) return {ok:false, message:'Boxes were updated, but marking this line as done failed: '+tagErr.message};
+  // Recorded against the standard 'LM' cost header (not the free-text charge_code) so it
+  // rolls up correctly into the month-end close dashboard alongside every other header.
+  await sbClient.from('provision_ledger').insert({shipment_id:tag.shipment_id, cost_header:'LM', event_type:'REVERSED', amount:provTotal, event_date: inv.entry_date || inv.invoice_date || todayISO(), related_invoice_id:invoiceId});
   await logAction(invoiceId, 'LM_LINE_ACCEPTED', CURRENT_USER.id, `${tag.charge_code} · ${tag.shipment_id} (${tag.box_ids.length} box${tag.box_ids.length>1?'es':''})`);
   await checkAndFinalizeLMInvoiceStatus(invoiceId);
   return {ok:true};
@@ -2206,6 +2311,120 @@ document.getElementById('btn-add-fx').addEventListener('click', async ()=>{
   document.getElementById('new-fx-currency').value=''; document.getElementById('new-fx-rate').value='';
   FX_RATES_CACHE = null; await loadFXTable();
 });
+async function loadPeriodLockPanel(){
+  const lock = await getPeriodLock();
+  const isAdmin = CURRENT_PROFILE.role === 'ADMIN';
+  document.getElementById('period-lock-status').innerHTML = lock && lock.locked_through
+    ? `<span class="status-pill st-locked">LOCKED through ${lock.locked_through}</span> — no invoice can be entered with an entry date on or before this, and provisional costs booked on or before this date can't be edited on re-upload.`
+    : `<span class="status-pill st-open">No period locked</span> — every entry date is currently accepted.`;
+  document.getElementById('btn-lock-period').disabled = !isAdmin;
+  document.getElementById('btn-unlock-period').disabled = !isAdmin;
+  if(!isAdmin) document.getElementById('period-lock-status').innerHTML += ` <span class="small">(Admin role required to change this.)</span>`;
+  const { data: logRows } = await sbClient.from('period_lock_log').select('*').order('performed_at',{ascending:false}).limit(20);
+  const lt = document.querySelector('#period-lock-log-table tbody');
+  lt.innerHTML = (logRows||[]).map(r=>`<tr><td>${r.action}</td><td>${r.locked_through||'—'}</td><td>${r.reason||''}</td><td class="small">${new Date(r.performed_at).toLocaleString()}</td></tr>`).join('');
+}
+document.getElementById('btn-lock-period').addEventListener('click', async ()=>{
+  const through = document.getElementById('new-lock-through').value;
+  if(!through){ alert('Pick a date to lock through.'); return; }
+  const lock = await getPeriodLock();
+  if(lock && lock.locked_through && through <= lock.locked_through){ alert(`Already locked through ${lock.locked_through} — locking can only move forward. Use Unlock first if you need to move it back.`); return; }
+  if(!confirm(`Lock every entry date through ${through}? Invoices can no longer be entered with an entry date on or before this, and provisional costs booked on or before this date become immutable on re-upload.`)) return;
+  const { error } = await sbClient.from('period_lock').update({locked_through:through, locked_by:CURRENT_USER.id, locked_at:new Date().toISOString()}).eq('id',1);
+  if(error){ alert('Could not lock: '+error.message); return; }
+  await sbClient.from('period_lock_log').insert({action:'LOCKED', locked_through:through, performed_by:CURRENT_USER.id});
+  document.getElementById('new-lock-through').value='';
+  await loadPeriodLockPanel();
+});
+document.getElementById('btn-unlock-period').addEventListener('click', async ()=>{
+  const lock = await getPeriodLock();
+  if(!lock || !lock.locked_through){ alert('Nothing is currently locked.'); return; }
+  const reason = prompt(`Unlocking removes the lock at ${lock.locked_through} entirely — every entry date will be accepted again until re-locked. State the reason (required, logged):`);
+  if(reason===null) return;
+  if(!reason.trim()){ alert('A reason is required to unlock.'); return; }
+  const { error } = await sbClient.from('period_lock').update({locked_through:null, locked_by:CURRENT_USER.id, locked_at:new Date().toISOString()}).eq('id',1);
+  if(error){ alert('Could not unlock: '+error.message); return; }
+  await sbClient.from('period_lock_log').insert({action:'UNLOCKED', locked_through:lock.locked_through, reason:reason.trim(), performed_by:CURRENT_USER.id});
+  await loadPeriodLockPanel();
+});
+
+/* ============================= MONTH-END CLOSE ============================= */
+async function initMonthEndClose(){
+  if(!document.getElementById('me-from').value){ setThisMonth(); }
+  await runMonthEndClose();
+}
+function setThisMonth(){
+  const now = new Date();
+  document.getElementById('me-from').value = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1)).toISOString().slice(0,10);
+  document.getElementById('me-to').value = new Date(Date.UTC(now.getFullYear(), now.getMonth()+1, 0)).toISOString().slice(0,10);
+}
+document.getElementById('btn-me-this-month').addEventListener('click', ()=>{ setThisMonth(); runMonthEndClose(); });
+document.getElementById('btn-me-run').addEventListener('click', runMonthEndClose);
+let ME_LAST_RESULT = null;
+// Closing = Opening + New Provisions − Provisions Reversed, using ONLY the ledger's
+// provisional-side events. "Invoices Booked" is a separate, parallel informational figure
+// (the actual/invoice side) — it does not feed into the Closing arithmetic, since the
+// provisional balance and the invoice amount can legitimately differ (that's the variance).
+async function runMonthEndClose(){
+  const from = document.getElementById('me-from').value, to = document.getElementById('me-to').value;
+  if(!from || !to){ document.getElementById('me-status').textContent = 'Pick a From and To date.'; return; }
+  document.getElementById('me-status').textContent = 'Loading ledger…';
+  const ledger = await fetchAllRows('provision_ledger', 'shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
+    null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; });
+  document.getElementById('me-status').textContent = `Loaded ${ledger.length} ledger events. Loading invoice data…`;
+  const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, taxable_amount)');
+  const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, taxable_amount)');
+
+  const perHeader = {};
+  const ensureH = (h)=>{ if(!perHeader[h]) perHeader[h] = {opening:0,newProv:0,invBooked:0,reversed:0}; return perHeader[h]; };
+  ledger.forEach(e=>{
+    const h = ensureH(e.cost_header);
+    if(e.event_type==='BOOKED'){ if(e.event_date < from) h.opening += e.amount; else if(e.event_date <= to) h.newProv += e.amount; }
+    else if(e.event_type==='REVERSED'){ if(e.event_date < from) h.opening -= e.amount; else if(e.event_date <= to) h.reversed += e.amount; }
+  });
+  tagRows.forEach(t=>{
+    const entryDate = t.invoices?.entry_date;
+    if(!entryDate || entryDate < from || entryDate > to) return;
+    const amt = t.entered_amount!=null ? t.entered_amount : (t.invoices?.taxable_amount||0);
+    ensureH(t.cost_header).invBooked += amt;
+  });
+  lmTagRows.forEach(t=>{
+    const entryDate = t.invoices?.entry_date;
+    if(!entryDate || entryDate < from || entryDate > to) return;
+    ensureH('LM').invBooked += (t.entered_amount||0);
+  });
+
+  const rows = Object.entries(perHeader).map(([h,v])=>({header:h, ...v, closing: v.opening+v.newProv-v.reversed}));
+  const tb = document.querySelector('#me-table tbody');
+  tb.innerHTML = rows.length ? rows.map(r=>`<tr><td>${HEADER_LABEL[r.header]||r.header}</td><td class="num">${fmt(r.opening)}</td><td class="num">${fmt(r.newProv)}</td><td class="num">${fmt(r.invBooked)}</td><td class="num">${fmt(r.reversed)}</td><td class="num">${fmt(r.closing)}</td></tr>`).join('')
+    : '<tr><td colspan="6" class="small">No ledger activity yet — remember this only tracks activity from when this feature shipped onward.</td></tr>';
+  document.getElementById('me-status').textContent = `${ledger.length} ledger events · ${rows.length} header(s) with activity · ${from} to ${to}.`;
+  ME_LAST_RESULT = {ledger, from, to};
+}
+document.getElementById('btn-me-export').addEventListener('click', ()=>{
+  if(!ME_LAST_RESULT){ alert('Run the report first.'); return; }
+  const { ledger, from, to } = ME_LAST_RESULT;
+  const perShip = {};
+  const ensureS = (sid,h)=>{ const k=`${sid}|${h}`; if(!perShip[k]) perShip[k]={shipment_id:sid, header:h, opening:0,newProv:0,reversed:0}; return perShip[k]; };
+  ledger.forEach(e=>{
+    const r = ensureS(e.shipment_id, e.cost_header);
+    if(e.event_type==='BOOKED'){ if(e.event_date<from) r.opening+=e.amount; else if(e.event_date<=to) r.newProv+=e.amount; }
+    else { if(e.event_date<from) r.opening-=e.amount; else if(e.event_date<=to) r.reversed+=e.amount; }
+  });
+  // Invoices Booked is intentionally omitted here — the ledger's REVERSED amount is
+  // already the per-shipment provisional share, but the matching per-shipment ACTUAL
+  // share isn't captured in the ledger as a separate field, so there's no clean way to
+  // attribute it to one shipment without re-deriving the weight allocation again.
+  const rows = Object.values(perShip).map(r=>({
+    'Shipment ID': r.shipment_id, 'Cost Header': HEADER_LABEL[r.header]||r.header,
+    'Opening Balance': round2(r.opening), 'New Provisions': round2(r.newProv),
+    'Provisions Reversed': round2(r.reversed), 'Closing Balance': round2(r.opening+r.newProv-r.reversed)
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Shipment Detail');
+  XLSX.writeFile(wb, `month_end_close_${from}_to_${to}.xlsx`);
+});
 
 /* ============================= TAB SWITCHING ============================= */
 function switchTab(name){
@@ -2215,6 +2434,7 @@ function switchTab(name){
   if(name==='disputes') loadDisputes();
   if(name==='aging') runAgingReport();
   if(name==='reports') runPnL();
+  if(name==='monthend') initMonthEndClose();
 }
 document.querySelectorAll('nav.steps button').forEach(b=> b.addEventListener('click', ()=> switchTab(b.dataset.tab)));
 </script>
