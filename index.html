@@ -324,9 +324,23 @@
 <!-- ===================== REPORTS ===================== -->
 <section class="tabpanel" id="tab-reports">
   <div id="pnl-strip"></div>
-  <div class="panel"><h2>P&amp;L by LOB</h2>
+  <div class="panel">
+    <h2>Filter by pickup date</h2>
+    <div class="row-actions">
+      <label class="small">From <input type="date" id="pnl-date-from"></label>
+      <label class="small">To <input type="date" id="pnl-date-to"></label>
+      <button class="btn secondary btn-sm" id="btn-pnl-apply-date">Apply</button>
+      <button class="btn secondary btn-sm" id="btn-pnl-clear-date">Clear</button>
+      <span class="small" id="pnl-date-status"></span>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:12px;"><h2>P&amp;L by LOB</h2>
     <p class="desc">Actual GM% uses actual-where-settled, provisional-as-stand-in where not — the "flagged" count shows how many shipments still have an unsettled header.</p>
     <div class="tablewrap" style="max-height:280px;"><table class="data" id="pnl-lob-table"><thead><tr><th>LOB</th><th class="num">Revenue</th><th class="num">Provisional Cost</th><th class="num">Provisional GM%</th><th class="num">Actual Cost</th><th class="num">Actual GM%</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="panel" style="margin-top:12px;"><h2>P&amp;L by LOB → Country → Product</h2>
+    <p class="desc">Expand a LOB to see its countries, expand a country to see its products. Same five columns rolled up at each level, respecting the date filter above.</p>
+    <div id="pnl-hierarchy"></div>
   </div>
   <div class="panel" style="margin-top:12px;"><h2>Shipment level</h2>
     <p class="desc">Click a shipment ID to drill down: cost by header (with linked invoice), and every invoice booked against it.</p>
@@ -1973,8 +1987,80 @@ document.getElementById('btn-writeback').addEventListener('click', async ()=>{
 });
 
 /* ============================= P&L / ACCOUNTING — LOB summary + shipment drill-down ============================= */
-let PNL_SHIP_CACHE = new Map();
+let PNL_SHIP_CACHE = new Map(), PNL_ALL_ROWS = [];
 function gmPct(rev, cost){ return rev ? ((rev-cost)/rev*100) : 0; }
+function renderPnLLobTable(byLOB){
+  const lt = document.querySelector('#pnl-lob-table tbody');
+  lt.innerHTML = Object.entries(byLOB).map(([lob,v])=>
+    `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.provCost)}</td>
+      <td class="num">${gmPct(v.revenue,v.provCost).toFixed(1)}%</td><td class="num">${fmt(v.actCost)}</td>
+      <td class="num">${gmPct(v.revenue,v.actCost).toFixed(1)}%${v.flagged?` <span class="status-pill st-review" title="${v.flagged} shipment(s) still provisional on some header">${v.flagged} flagged</span>`:''}</td></tr>`
+  ).join('');
+}
+function aggregateBy(rows, keyFn){
+  const out = {};
+  rows.forEach(r=>{
+    const k = keyFn(r);
+    if(!out[k]) out[k] = {revenue:0, provCost:0, actCost:0, flagged:0};
+    out[k].revenue += r.revenue; out[k].provCost += r.provCost; out[k].actCost += r.actCost;
+    if(r.flag) out[k].flagged++;
+  });
+  return out;
+}
+function pnlRowHtml(label, v, indent){
+  return `<tr style="${indent?`padding-left:${indent}px;`:''}"><td style="padding-left:${indent||0}px;">${label}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.provCost)}</td>
+    <td class="num">${gmPct(v.revenue,v.provCost).toFixed(1)}%</td><td class="num">${fmt(v.actCost)}</td>
+    <td class="num">${gmPct(v.revenue,v.actCost).toFixed(1)}%${v.flagged?` <span class="status-pill st-review">${v.flagged} flagged</span>`:''}</td></tr>`;
+}
+// Three-level expandable rollup (LOB → Country → Product) using native <details>/<summary> —
+// no custom expand/collapse state to manage, and it stays fast even at 20,000+ rows because
+// the aggregation itself is done once per level with plain object accumulation, not per-row
+// DOM writes.
+function renderPnLHierarchy(rows){
+  const byLOB = aggregateBy(rows, r=>r.lob);
+  const html = Object.entries(byLOB).map(([lob, lobAgg])=>{
+    const lobRows = rows.filter(r=>r.lob===lob);
+    const byCountry = aggregateBy(lobRows, r=>r.country);
+    const countryHtml = Object.entries(byCountry).map(([country, countryAgg])=>{
+      const countryRows = lobRows.filter(r=>r.country===country);
+      const byProduct = aggregateBy(countryRows, r=>r.product);
+      const productTable = `<table class="data" style="margin:4px 0 8px 20px;"><tbody>${Object.entries(byProduct).map(([product,v])=>pnlRowHtml(product,v,20)).join('')}</tbody></table>`;
+      return `<details style="margin-left:12px;"><summary>${pnlRowSummary(country, countryAgg)}</summary>${productTable}</details>`;
+    }).join('');
+    return `<details><summary>${pnlRowSummary(lob, lobAgg, true)}</summary>${countryHtml}</details>`;
+  }).join('');
+  document.getElementById('pnl-hierarchy').innerHTML = html || '<div class="emptystate">No data for this date range.</div>';
+}
+function pnlRowSummary(label, v, bold){
+  return `<span style="${bold?'font-weight:600;':''}cursor:pointer;">${label}</span> — Revenue: ${fmt(v.revenue)} · Prov. Cost: ${fmt(v.provCost)} (${gmPct(v.revenue,v.provCost).toFixed(1)}% GM) · Act. Cost: ${fmt(v.actCost)} (${gmPct(v.revenue,v.actCost).toFixed(1)}% GM)${v.flagged?` · ${v.flagged} flagged`:''}`;
+}
+// Everything (flat LOB table, hierarchy, shipment table) redraws from this one filtered
+// slice, so the date filter and all three views can never drift out of sync with each other.
+function applyPnLDateFilterAndRedraw(){
+  const from = document.getElementById('pnl-date-from').value;
+  const to = document.getElementById('pnl-date-to').value;
+  let rows = PNL_ALL_ROWS;
+  if(from) rows = rows.filter(r=> r.pickup_date && r.pickup_date >= from);
+  if(to) rows = rows.filter(r=> r.pickup_date && r.pickup_date <= to);
+  document.getElementById('pnl-date-status').textContent = (from||to) ? `Showing ${rows.length} of ${PNL_ALL_ROWS.length} shipments (${from||'…'} to ${to||'…'})` : '';
+  const totalRev = rows.reduce((s,r)=>s+r.revenue,0), totalProv = rows.reduce((s,r)=>s+r.provCost,0), totalAct = rows.reduce((s,r)=>s+r.actCost,0);
+  document.getElementById('pnl-strip').innerHTML = `<div class="ledgerstrip">
+    <div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(totalRev)}</div></div>
+    <div class="cell"><div class="lab">Provisional cost</div><div class="val">${fmt(totalProv)}</div></div>
+    <div class="cell"><div class="lab">Provisional GM%</div><div class="val">${gmPct(totalRev,totalProv).toFixed(1)}%</div></div>
+    <div class="cell"><div class="lab">Actual cost</div><div class="val">${fmt(totalAct)}</div></div>
+    <div class="cell"><div class="lab">Actual GM%</div><div class="val">${gmPct(totalRev,totalAct).toFixed(1)}%</div></div>
+  </div>`;
+  renderPnLLobTable(aggregateBy(rows, r=>r.lob));
+  renderPnLHierarchy(rows);
+  drawPnLShipTable(rows);
+  window._pnlRows = rows;
+}
+document.getElementById('btn-pnl-apply-date').addEventListener('click', applyPnLDateFilterAndRedraw);
+document.getElementById('btn-pnl-clear-date').addEventListener('click', ()=>{
+  document.getElementById('pnl-date-from').value=''; document.getElementById('pnl-date-to').value='';
+  applyPnLDateFilterAndRedraw();
+});
 async function runPnL(){
   document.getElementById('pnl-strip').innerHTML = '<div class="small">Refreshing P&amp;L (this recomputes the whole rollup server-side — may take a few seconds on a large dataset)…</div>';
   const { error: refreshErr } = await sbClient.rpc('refresh_pnl_shipment_level');
@@ -1987,36 +2073,21 @@ async function runPnL(){
     null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading P&amp;L… ${n} shipments so far</div>`; });
   PNL_SHIP_CACHE = new Map(viewRows.map(r=>[r.shipment_id, r]));
 
-  const shipRows = viewRows.map(r=>{
+  document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${viewRows.length} shipments. Loading Country/Product attributes…</div>`;
+  const attrRows = await fetchAllRows('shipment_attributes', 'shipment_id, attribute_name, value', q=>q.in('attribute_name',['Country','Product']));
+  const attrMap = new Map(); // shipment_id -> {Country, Product}
+  attrRows.forEach(a=>{ if(!attrMap.has(a.shipment_id)) attrMap.set(a.shipment_id, {}); attrMap.get(a.shipment_id)[a.attribute_name] = a.value; });
+
+  PNL_ALL_ROWS = viewRows.map(r=>{
     const revenue = r.revenue || 0, provCost = r.prov_cost || 0, actCost = r.act_cost || 0;
-    return {shipment_id:r.shipment_id, lob:r.lob||'Unassigned', revenue, provCost, actCost,
+    const attrs = attrMap.get(r.shipment_id) || {};
+    return {shipment_id:r.shipment_id, lob:r.lob||'Unassigned', pickup_date:r.pickup_date,
+      country: attrs.Country || 'Unassigned', product: attrs.Product || 'Unassigned',
+      revenue, provCost, actCost,
       provGM: gmPct(revenue,provCost), actGM: gmPct(revenue,actCost),
       flag: r.header_count===0 ? 'No cost data' : (r.any_unsettled ? 'Provisional standing in for actual on some/all headers' : null)};
   });
-
-  const byLOB = {};
-  shipRows.forEach(r=>{
-    if(!byLOB[r.lob]) byLOB[r.lob] = {revenue:0, provCost:0, actCost:0, flagged:0};
-    byLOB[r.lob].revenue += r.revenue; byLOB[r.lob].provCost += r.provCost; byLOB[r.lob].actCost += r.actCost;
-    if(r.flag) byLOB[r.lob].flagged++;
-  });
-  const totalRev = shipRows.reduce((s,r)=>s+r.revenue,0), totalProv = shipRows.reduce((s,r)=>s+r.provCost,0), totalAct = shipRows.reduce((s,r)=>s+r.actCost,0);
-  document.getElementById('pnl-strip').innerHTML = `<div class="ledgerstrip">
-    <div class="cell"><div class="lab">Revenue</div><div class="val">${fmt(totalRev)}</div></div>
-    <div class="cell"><div class="lab">Provisional cost</div><div class="val">${fmt(totalProv)}</div></div>
-    <div class="cell"><div class="lab">Provisional GM%</div><div class="val">${gmPct(totalRev,totalProv).toFixed(1)}%</div></div>
-    <div class="cell"><div class="lab">Actual cost</div><div class="val">${fmt(totalAct)}</div></div>
-    <div class="cell"><div class="lab">Actual GM%</div><div class="val">${gmPct(totalRev,totalAct).toFixed(1)}%</div></div>
-  </div>`;
-
-  const lt = document.querySelector('#pnl-lob-table tbody');
-  lt.innerHTML = Object.entries(byLOB).map(([lob,v])=>
-    `<tr><td>${lob}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${fmt(v.provCost)}</td>
-      <td class="num">${gmPct(v.revenue,v.provCost).toFixed(1)}%</td><td class="num">${fmt(v.actCost)}</td>
-      <td class="num">${gmPct(v.revenue,v.actCost).toFixed(1)}%${v.flagged?` <span class="status-pill st-review" title="${v.flagged} shipment(s) still provisional on some header">${v.flagged} flagged</span>`:''}</td></tr>`
-  ).join('');
-  drawPnLShipTable(shipRows);
-  window._pnlRows = shipRows;
+  applyPnLDateFilterAndRedraw();
 }
 // Was `tbody.innerHTML += rowHtml` inside a loop — for 20,000+ rows that's roughly n²
 // work (every += re-serializes and re-parses the entire accumulated string), which is
