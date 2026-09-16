@@ -2009,39 +2009,51 @@ function renderPnLLobTable(rows){
   const byLOB = aggregateBy(rows, r=>r.lob);
   const lt = document.querySelector('#pnl-lob-table tbody');
   lt.innerHTML = Object.entries(byLOB).map(([lob,v], i)=>
-    `<tr class="mono" style="cursor:pointer;" data-lob-toggle="${i}"><td style="color:var(--teal);">▸ ${lob}</td>${pnlRowCells(v)}</tr>
-     <tr id="lobdrill-${i}" style="display:none;"><td colspan="6" style="padding-left:16px;"></td></tr>`
+    `<tr class="mono" style="cursor:pointer;" data-lob-toggle="${i}" data-lob="${lob}"><td style="color:var(--teal);">▸ ${lob}</td>${pnlRowCells(v)}</tr>`
   ).join('');
-  lt.querySelectorAll('[data-lob-toggle]').forEach(tr=>{
-    const idx = tr.dataset.lobToggle, lob = Object.keys(byLOB)[idx];
-    tr.addEventListener('click', ()=> togglePnLLobDrill(idx, lob));
-  });
+  lt.querySelectorAll('[data-lob-toggle]').forEach(tr=> tr.addEventListener('click', ()=> togglePnLLobDrill(tr)));
 }
-function togglePnLLobDrill(idx, lob){
-  const row = document.getElementById('lobdrill-'+idx);
-  if(row.style.display==='table-row'){ row.style.display='none'; return; }
-  row.style.display = 'table-row';
+// All levels are real rows in the SAME <tbody>, indented via padding on the first cell —
+// not separate nested <table> elements (which was the actual cause of the misalignment:
+// each nested table sized its own columns independently of the parent's).
+function togglePnLLobDrill(lobTr){
+  const lob = lobTr.dataset.lob;
+  const already = lobTr.nextElementSibling && lobTr.nextElementSibling.classList.contains('pnl-country-row') && lobTr.nextElementSibling.dataset.forLob===lob;
+  if(already){
+    let sib = lobTr.nextElementSibling;
+    while(sib && (sib.classList.contains('pnl-country-row') || sib.classList.contains('pnl-product-row')) && sib.dataset.forLob===lob){ const next=sib.nextElementSibling; sib.remove(); sib=next; }
+    lobTr.querySelector('td').textContent = '▸ ' + lob;
+    return;
+  }
+  lobTr.querySelector('td').textContent = '▾ ' + lob;
   const lobRows = PNL_FILTERED_ROWS.filter(r=>r.lob===lob);
   const byCountry = aggregateBy(lobRows, r=>r.country);
-  const cell = row.querySelector('td');
-  cell.innerHTML = `<table class="data"><tbody>` + Object.entries(byCountry).map(([country,v],ci)=>
-    `<tr class="mono" style="cursor:pointer;" data-country-toggle="${idx}-${ci}"><td style="color:var(--teal);">▸ ${country}</td>${pnlRowCells(v)}</tr>
-     <tr id="countrydrill-${idx}-${ci}" style="display:none;"><td colspan="6" style="padding-left:16px;"></td></tr>`
-  ).join('') + `</tbody></table>`;
-  cell.querySelectorAll('[data-country-toggle]').forEach(tr=>{
-    const key = tr.dataset.countryToggle, ci = key.split('-')[1], country = Object.keys(byCountry)[ci];
-    tr.addEventListener('click', e=>{ e.stopPropagation(); togglePnLCountryDrill(key, lob, country); });
-  });
+  const frag = Object.entries(byCountry).map(([country,v])=>
+    `<tr class="mono pnl-country-row" data-for-lob="${lob}" data-country="${country}" style="cursor:pointer;"><td style="padding-left:20px;color:var(--teal);">▸ ${country}</td>${pnlRowCells(v)}</tr>`
+  ).join('');
+  lobTr.insertAdjacentHTML('afterend', frag);
+  let sib = lobTr.nextElementSibling;
+  while(sib && sib.classList.contains('pnl-country-row') && sib.dataset.forLob===lob){
+    sib.addEventListener('click', e=>{ e.stopPropagation(); togglePnLCountryDrill(sib); });
+    sib = sib.nextElementSibling;
+  }
 }
-function togglePnLCountryDrill(key, lob, country){
-  const row = document.getElementById('countrydrill-'+key);
-  if(row.style.display==='table-row'){ row.style.display='none'; return; }
-  row.style.display = 'table-row';
+function togglePnLCountryDrill(countryTr){
+  const lob = countryTr.dataset.forLob, country = countryTr.dataset.country;
+  const already = countryTr.nextElementSibling && countryTr.nextElementSibling.classList.contains('pnl-product-row') && countryTr.nextElementSibling.dataset.forCountry===country;
+  if(already){
+    let sib = countryTr.nextElementSibling;
+    while(sib && sib.classList.contains('pnl-product-row') && sib.dataset.forCountry===country){ const next=sib.nextElementSibling; sib.remove(); sib=next; }
+    countryTr.querySelector('td').textContent = '▸ ' + country;
+    return;
+  }
+  countryTr.querySelector('td').textContent = '▾ ' + country;
   const countryRows = PNL_FILTERED_ROWS.filter(r=>r.lob===lob && r.country===country);
   const byProduct = aggregateBy(countryRows, r=>r.product);
-  row.querySelector('td').innerHTML = `<table class="data"><tbody>` + Object.entries(byProduct).map(([product,v])=>
-    `<tr><td>${product}</td>${pnlRowCells(v)}</tr>`
-  ).join('') + `</tbody></table>`;
+  const frag = Object.entries(byProduct).map(([product,v])=>
+    `<tr class="pnl-product-row" data-for-country="${country}"><td style="padding-left:40px;">${product}</td>${pnlRowCells(v)}</tr>`
+  ).join('');
+  countryTr.insertAdjacentHTML('afterend', frag);
 }
 // Everything (flat LOB table with its inline drill-down, and the shipment table) redraws
 // from this one filtered slice, so the date filter can never leave them out of sync.
