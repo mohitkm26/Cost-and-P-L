@@ -487,24 +487,52 @@ function deriveFromRef(ref){
   return m ? {shipmentId:m[1], boxId:s} : {shipmentId:s, boxId:''};
 }
 function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
-// Supabase/PostgREST caps a single .select() around 1000 rows by default.
-// Any "fetch the whole table" query MUST page through with .range(), or it
-// silently truncates on tables this size — this was the root cause of the
-// P&L/Aging numbers being a small fraction of the real total.
-// Pages are fetched in concurrent batches (not one at a time) — at current data
-// volumes, sequential one-page-then-wait pagination was taking long enough to
-// look like the screen had hung, when it was really just serial network latency.
-//
-// CRITICAL: a genuinely failed page must NEVER be treated as "end of data." The
-// earlier version returned [] on a double-timeout, and an empty array looks
-// identical to a real last page (data.length < PAGE) — so a single transient
-// failure anywhere in a 200+ page fetch silently truncated everything after it,
-// not just that one page. Confirmed as the cause of a real under-count in the
-// Month-End Close report. Now a failed page throws instead, after more retries,
-// so the whole fetch aborts loudly rather than quietly returning partial data
-// that looks complete.
-async function fetchAllRows(table, selectStr, applyFilters, onProgress){
-  const PAGE = 1000, CONCURRENCY = 4, TIMEOUT_MS = 20000, MAX_ATTEMPTS = 4;
+async function fetchAllRows(table, selectStr, applyFilters, onProgress, cursorColumn){
+  const PAGE = 1000, TIMEOUT_MS = 20000, MAX_ATTEMPTS = 4;
+  // Keyset/cursor pagination — pass cursorColumn (a unique, orderable column, typically
+  // the integer id) to use this instead of OFFSET-based .range(). OFFSET forces Postgres
+  // to scan and discard every row before the requested page, which gets progressively
+  // slower the deeper you page — confirmed hitting Postgres's own statement_timeout at
+  // offset ~144,000 on a 259,000-row table. Keyset pagination stays fast at any depth,
+  // since Postgres can seek directly via the index instead of scanning from the start.
+  if(cursorColumn){
+    let all = [], lastVal = null, done = false;
+    while(!done){
+      let lastErr = null, data = null;
+      for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+        let q = sbClient.from(table).select(selectStr).order(cursorColumn, {ascending:true}).limit(PAGE);
+        if(lastVal!=null) q = q.gt(cursorColumn, lastVal);
+        if(applyFilters) q = applyFilters(q);
+        try{
+          const result = await Promise.race([q, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))]);
+          if(result.error) throw new Error(result.error.message);
+          data = result.data||[]; lastErr = null; break;
+        }catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 500*attempt)); }
+      }
+      if(lastErr) throw new Error(`fetchAllRows(${table}) failed after ${cursorColumn} > ${lastVal}, ${MAX_ATTEMPTS} attempts: ${lastErr.message}`);
+      all = all.concat(data);
+      if(data.length < PAGE) done = true; else lastVal = data[data.length-1][cursorColumn];
+      if(onProgress) onProgress(all.length);
+    }
+    return all;
+  }
+  // Supabase/PostgREST caps a single .select() around 1000 rows by default.
+  // Any "fetch the whole table" query MUST page through with .range(), or it
+  // silently truncates on tables this size — this was the root cause of the
+  // P&L/Aging numbers being a small fraction of the real total.
+  // Pages are fetched in concurrent batches (not one at a time) — at current data
+  // volumes, sequential one-page-then-wait pagination was taking long enough to
+  // look like the screen had hung, when it was really just serial network latency.
+  //
+  // CRITICAL: a genuinely failed page must NEVER be treated as "end of data." The
+  // earlier version returned [] on a double-timeout, and an empty array looks
+  // identical to a real last page (data.length < PAGE) — so a single transient
+  // failure anywhere in a 200+ page fetch silently truncated everything after it,
+  // not just that one page. Confirmed as the cause of a real under-count in the
+  // Month-End Close report. Now a failed page throws instead, after more retries,
+  // so the whole fetch aborts loudly rather than quietly returning partial data
+  // that looks complete.
+  const CONCURRENCY = 4;
   let all = [], from = 0, done = false;
   while(!done){
     const starts = Array.from({length:CONCURRENCY}, (_,i)=> from + i*PAGE);
@@ -2387,8 +2415,8 @@ async function runMonthEndClose(){
   if(!from || !to){ document.getElementById('me-status').textContent = 'Pick a From and To date.'; return; }
   try{
     document.getElementById('me-status').textContent = 'Loading ledger…';
-    const ledger = await fetchAllRows('provision_ledger', 'shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
-      null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; });
+    const ledger = await fetchAllRows('provision_ledger', 'id, shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
+      null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; }, 'id');
     document.getElementById('me-status').textContent = `Loaded ${ledger.length} ledger events. Loading invoice data…`;
     const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
     const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
