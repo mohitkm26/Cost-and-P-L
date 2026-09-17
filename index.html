@@ -2372,8 +2372,8 @@ async function runMonthEndClose(){
   const ledger = await fetchAllRows('provision_ledger', 'shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
     null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; });
   document.getElementById('me-status').textContent = `Loaded ${ledger.length} ledger events. Loading invoice data…`;
-  const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, taxable_amount)');
-  const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, taxable_amount)');
+  const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
+  const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
 
   const perHeader = {};
   const ensureH = (h)=>{ if(!perHeader[h]) perHeader[h] = {opening:0,newProv:0,invBooked:0,reversed:0}; return perHeader[h]; };
@@ -2383,13 +2383,15 @@ async function runMonthEndClose(){
     else if(e.event_type==='REVERSED'){ if(e.event_date < from) h.opening -= e.amount; else if(e.event_date <= to) h.reversed += e.amount; }
   });
   tagRows.forEach(t=>{
-    const entryDate = t.invoices?.entry_date;
+    // Same fallback chain used when backfilling the ledger — an invoice created before
+    // entry_date existed has it as null, and was being silently excluded entirely here.
+    const entryDate = t.invoices?.entry_date || t.invoices?.invoice_date || (t.invoices?.created_at ? t.invoices.created_at.slice(0,10) : null);
     if(!entryDate || entryDate < from || entryDate > to) return;
     const amt = t.entered_amount!=null ? t.entered_amount : (t.invoices?.taxable_amount||0);
     ensureH(t.cost_header).invBooked += amt;
   });
   lmTagRows.forEach(t=>{
-    const entryDate = t.invoices?.entry_date;
+    const entryDate = t.invoices?.entry_date || t.invoices?.invoice_date || (t.invoices?.created_at ? t.invoices.created_at.slice(0,10) : null);
     if(!entryDate || entryDate < from || entryDate > to) return;
     ensureH('LM').invBooked += (t.entered_amount||0);
   });
