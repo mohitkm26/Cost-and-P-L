@@ -496,25 +496,53 @@ async function fetchAllRows(table, selectStr, applyFilters, onProgress, cursorCo
   // offset ~144,000 on a 259,000-row table. Keyset pagination stays fast at any depth,
   // since Postgres can seek directly via the index instead of scanning from the start.
   if(cursorColumn){
-    let all = [], lastVal = null, done = false;
-    while(!done){
-      let lastErr = null, data = null;
-      for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
-        let q = sbClient.from(table).select(selectStr).order(cursorColumn, {ascending:true}).limit(PAGE);
-        if(lastVal!=null) q = q.gt(cursorColumn, lastVal);
-        if(applyFilters) q = applyFilters(q);
-        try{
-          const result = await Promise.race([q, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))]);
-          if(result.error) throw new Error(result.error.message);
-          data = result.data||[]; lastErr = null; break;
-        }catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 500*attempt)); }
+    // Plain keyset was strictly sequential — each page has to know the previous page's
+    // last value before it can start, so ~260 pages meant ~260 one-at-a-time round trips
+    // (the actual cause of the 10-minute load, not a query-speed problem). Splitting the
+    // id range into concurrent chunks up front gets parallelism back while still avoiding
+    // OFFSET entirely — each chunk uses an indexed range condition (id BETWEEN x AND y),
+    // which stays fast at any depth, unlike scanning-and-discarding to a deep offset.
+    const CHUNKS = 8;
+    let minQ = sbClient.from(table).select(cursorColumn).order(cursorColumn,{ascending:true}).limit(1);
+    let maxQ = sbClient.from(table).select(cursorColumn).order(cursorColumn,{ascending:false}).limit(1);
+    if(applyFilters){ minQ = applyFilters(minQ); maxQ = applyFilters(maxQ); }
+    const [minRes, maxRes] = await Promise.all([minQ, maxQ]);
+    if(minRes.error || maxRes.error) throw new Error(`fetchAllRows(${table}) could not determine id range: ${(minRes.error||maxRes.error).message}`);
+    if(!minRes.data.length) return []; // genuinely empty result set for this filter
+    const minId = minRes.data[0][cursorColumn], maxId = maxRes.data[0][cursorColumn];
+    const span = Math.max(1, (maxId - minId) / CHUNKS);
+    const bounds = Array.from({length:CHUNKS+1}, (_,i)=> i===CHUNKS ? maxId : minId + Math.floor(span*i));
+    let totalSoFar = 0;
+    const fetchChunk = async (lo, hi)=>{
+      let chunkRows = [], lastVal = lo - 1, done = false;
+      while(!done){
+        let lastErr = null, data = null;
+        for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+          let q = sbClient.from(table).select(selectStr).gt(cursorColumn,lastVal).lte(cursorColumn,hi).order(cursorColumn,{ascending:true}).limit(PAGE);
+          if(applyFilters) q = applyFilters(q);
+          try{
+            const result = await Promise.race([q, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))]);
+            if(result.error) throw new Error(result.error.message);
+            data = result.data||[]; lastErr = null; break;
+          }catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 500*attempt)); }
+        }
+        if(lastErr) throw new Error(`fetchAllRows(${table}) failed after ${cursorColumn} > ${lastVal}, ${MAX_ATTEMPTS} attempts: ${lastErr.message}`);
+        chunkRows = chunkRows.concat(data);
+        totalSoFar += data.length;
+        if(onProgress) onProgress(totalSoFar);
+        if(data.length < PAGE) done = true; else lastVal = data[data.length-1][cursorColumn];
       }
-      if(lastErr) throw new Error(`fetchAllRows(${table}) failed after ${cursorColumn} > ${lastVal}, ${MAX_ATTEMPTS} attempts: ${lastErr.message}`);
-      all = all.concat(data);
-      if(data.length < PAGE) done = true; else lastVal = data[data.length-1][cursorColumn];
-      if(onProgress) onProgress(all.length);
+      return chunkRows;
+    };
+    const chunkPromises = [];
+    for(let i=0;i<CHUNKS;i++){
+      const lo = i===0 ? minId : bounds[i]+1;
+      const hi = bounds[i+1];
+      if(lo > hi) continue; // degenerate chunk on a small id range — skip, harmless
+      chunkPromises.push(fetchChunk(lo, hi));
     }
-    return all;
+    const chunkResults = await Promise.all(chunkPromises);
+    return chunkResults.flat();
   }
   // Supabase/PostgREST caps a single .select() around 1000 rows by default.
   // Any "fetch the whole table" query MUST page through with .range(), or it
