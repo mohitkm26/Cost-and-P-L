@@ -494,25 +494,36 @@ function chunkArray(arr,size){ const out=[]; for(let i=0;i<arr.length;i+=size) o
 // Pages are fetched in concurrent batches (not one at a time) — at current data
 // volumes, sequential one-page-then-wait pagination was taking long enough to
 // look like the screen had hung, when it was really just serial network latency.
+//
+// CRITICAL: a genuinely failed page must NEVER be treated as "end of data." The
+// earlier version returned [] on a double-timeout, and an empty array looks
+// identical to a real last page (data.length < PAGE) — so a single transient
+// failure anywhere in a 200+ page fetch silently truncated everything after it,
+// not just that one page. Confirmed as the cause of a real under-count in the
+// Month-End Close report. Now a failed page throws instead, after more retries,
+// so the whole fetch aborts loudly rather than quietly returning partial data
+// that looks complete.
 async function fetchAllRows(table, selectStr, applyFilters, onProgress){
-  const PAGE = 1000, CONCURRENCY = 4, TIMEOUT_MS = 15000;
+  const PAGE = 1000, CONCURRENCY = 4, TIMEOUT_MS = 20000, MAX_ATTEMPTS = 4;
   let all = [], from = 0, done = false;
   while(!done){
     const starts = Array.from({length:CONCURRENCY}, (_,i)=> from + i*PAGE);
     const results = await Promise.all(starts.map(async (start)=>{
-      let q = sbClient.from(table).select(selectStr).range(start, start+PAGE-1);
-      if(applyFilters) q = applyFilters(q);
-      // A hung request (e.g. exceeding the project's connection limit) must not block
-      // forever — race it against a timeout and retry once rather than freezing the page.
-      const runOnce = () => Promise.race([
-        q, new Promise((_,rej)=> setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))
-      ]);
-      let result;
-      try{ result = await runOnce(); }
-      catch(e){ try{ result = await runOnce(); } catch(e2){ console.error(`fetchAllRows(${table}) timed out twice at range ${start}-${start+PAGE-1}`); return []; } }
-      const { data, error } = result;
-      if(error){ console.error(`fetchAllRows(${table}) failed:`, error.message); return []; }
-      return data||[];
+      let lastErr = null;
+      for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+        let q = sbClient.from(table).select(selectStr).range(start, start+PAGE-1);
+        if(applyFilters) q = applyFilters(q);
+        try{
+          const result = await Promise.race([
+            q, new Promise((_,rej)=> setTimeout(()=>rej(new Error('timeout')), TIMEOUT_MS))
+          ]);
+          if(result.error) throw new Error(result.error.message);
+          return result.data||[];
+        }catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 500*attempt)); }
+      }
+      // Every attempt failed — this MUST stop the whole fetch, not return [] and
+      // let the caller believe the table ended here.
+      throw new Error(`fetchAllRows(${table}) failed at range ${start}-${start+PAGE-1} after ${MAX_ATTEMPTS} attempts: ${lastErr?.message}`);
     }));
     for(const data of results){ all = all.concat(data); if(data.length < PAGE) done = true; }
     from += CONCURRENCY*PAGE;
@@ -2188,21 +2199,27 @@ document.getElementById('btn-pnl-clear-date').addEventListener('click', ()=>{
 });
 async function runPnL(){
   document.getElementById('pnl-strip').innerHTML = '<div class="small">Refreshing P&amp;L (this recomputes the whole rollup server-side — may take a few seconds on a large dataset)…</div>';
-  const { error: refreshErr } = await sbClient.rpc('refresh_pnl_shipment_level');
-  if(refreshErr){ document.getElementById('pnl-strip').innerHTML = `<div class="note err">Could not refresh: ${refreshErr.message}. Showing whatever was last computed, if anything.</div>`; }
-  // Reads from the pnl_shipment_level MATERIALIZED view — a plain (non-materialized) view
-  // with GROUP BY was the earlier mistake: every paginated read re-ran the full aggregation
-  // over shipment_costs from scratch. This is pre-computed once by the refresh call above,
-  // so reading it back is as cheap as reading any ordinary table.
-  const viewRows = await fetchAllRows('pnl_shipment_level', '*',
-    null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading P&amp;L… ${n} shipments so far</div>`; });
-  PNL_SHIP_CACHE = new Map(viewRows.map(r=>[r.shipment_id, r]));
+  try{
+    const { error: refreshErr } = await sbClient.rpc('refresh_pnl_shipment_level');
+    if(refreshErr){ document.getElementById('pnl-strip').innerHTML = `<div class="note err">Could not refresh: ${refreshErr.message}. Showing whatever was last computed, if anything.</div>`; }
+    // Reads from the pnl_shipment_level MATERIALIZED view — a plain (non-materialized) view
+    // with GROUP BY was the earlier mistake: every paginated read re-ran the full aggregation
+    // over shipment_costs from scratch. This is pre-computed once by the refresh call above,
+    // so reading it back is as cheap as reading any ordinary table.
+    const viewRows = await fetchAllRows('pnl_shipment_level', '*',
+      null, (n)=>{ document.getElementById('pnl-strip').innerHTML = `<div class="small">Loading P&amp;L… ${n} shipments so far</div>`; });
+    PNL_SHIP_CACHE = new Map(viewRows.map(r=>[r.shipment_id, r]));
 
-  document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${viewRows.length} shipments. Loading Country/Product attributes…</div>`;
-  const attrRows = await fetchAllRows('shipment_attributes', 'shipment_id, attribute_name, value', q=>q.in('attribute_name',['Country','Product']));
-  const attrMap = new Map(); // shipment_id -> {Country, Product}
-  attrRows.forEach(a=>{ if(!attrMap.has(a.shipment_id)) attrMap.set(a.shipment_id, {}); attrMap.get(a.shipment_id)[a.attribute_name] = a.value; });
-
+    document.getElementById('pnl-strip').innerHTML = `<div class="small">Loaded ${viewRows.length} shipments. Loading Country/Product attributes…</div>`;
+    const attrRows = await fetchAllRows('shipment_attributes', 'shipment_id, attribute_name, value', q=>q.in('attribute_name',['Country','Product']));
+    const attrMap = new Map(); // shipment_id -> {Country, Product}
+    attrRows.forEach(a=>{ if(!attrMap.has(a.shipment_id)) attrMap.set(a.shipment_id, {}); attrMap.get(a.shipment_id)[a.attribute_name] = a.value; });
+    await finishPnLRender(viewRows, attrMap);
+  }catch(err){
+    document.getElementById('pnl-strip').innerHTML = `<div class="note err">Could not load complete data: ${err.message}. Whatever's showing below (if anything) is from a PREVIOUS run and must not be trusted — click Refresh P&amp;L again.</div>`;
+  }
+}
+async function finishPnLRender(viewRows, attrMap){
   PNL_ALL_ROWS = viewRows.map(r=>{
     const revenue = r.revenue || 0, provCost = r.prov_cost || 0, actCost = r.act_cost || 0;
     const attrs = attrMap.get(r.shipment_id) || {};
@@ -2368,13 +2385,19 @@ let ME_LAST_RESULT = null;
 async function runMonthEndClose(){
   const from = document.getElementById('me-from').value, to = document.getElementById('me-to').value;
   if(!from || !to){ document.getElementById('me-status').textContent = 'Pick a From and To date.'; return; }
-  document.getElementById('me-status').textContent = 'Loading ledger…';
-  const ledger = await fetchAllRows('provision_ledger', 'shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
-    null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; });
-  document.getElementById('me-status').textContent = `Loaded ${ledger.length} ledger events. Loading invoice data…`;
-  const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
-  const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
-
+  try{
+    document.getElementById('me-status').textContent = 'Loading ledger…';
+    const ledger = await fetchAllRows('provision_ledger', 'shipment_id, cost_header, event_type, amount, event_date, related_invoice_id',
+      null, (n)=>{ document.getElementById('me-status').textContent = `Loading ledger… ${n} events so far`; });
+    document.getElementById('me-status').textContent = `Loaded ${ledger.length} ledger events. Loading invoice data…`;
+    const tagRows = await fetchAllRows('invoice_tags', 'cost_header, entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
+    const lmTagRows = await fetchAllRows('lm_invoice_tags', 'entered_amount, invoices(entry_date, invoice_date, taxable_amount, created_at)');
+    await computeAndRenderMonthEnd(ledger, tagRows, lmTagRows, from, to);
+  }catch(err){
+    document.getElementById('me-status').innerHTML = `<span style="color:var(--red);">Could not load complete data: ${err.message}. The numbers below (if any) are from a PREVIOUS successful run and must not be trusted for this range — click Run again.</span>`;
+  }
+}
+async function computeAndRenderMonthEnd(ledger, tagRows, lmTagRows, from, to){
   const perHeader = {};
   const ensureH = (h)=>{ if(!perHeader[h]) perHeader[h] = {opening:0,newProv:0,invBooked:0,reversed:0}; return perHeader[h]; };
   ledger.forEach(e=>{
