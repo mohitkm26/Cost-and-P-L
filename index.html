@@ -1218,14 +1218,18 @@ async function checkGroupsExist(rows){
   const mawbs = [...new Set(rows.filter(r=>r.groupType==='MAWB').map(r=>r.groupKey))];
   const shipIds = [...new Set(rows.filter(r=>r.groupType==='SHIPMENT').map(r=>r.groupKey))];
   const bad = [];
+  // fetchAllRows, not a single .select() — a MAWB groups many shipments, so checking 40+
+  // MAWBs at once can return well over 1000 shipment rows and silently truncate, wrongly
+  // reporting a MAWB as "zero shipments" when it's simply outside the truncated window.
+  // Confirmed: 40 of 41 flagged MAWBs genuinely existed before this fix.
   if(mawbs.length){
-    const { data } = await sbClient.from('shipments').select('mawb').in('mawb', mawbs);
-    const found = new Set((data||[]).map(r=>r.mawb));
+    const data = await fetchAllRows('shipments', 'mawb', q=>q.in('mawb', mawbs));
+    const found = new Set(data.map(r=>r.mawb));
     mawbs.forEach(m=>{ if(!found.has(m)) bad.push('MAWB:'+m); });
   }
   if(shipIds.length){
-    const { data } = await sbClient.from('shipments').select('shipment_id').in('shipment_id', shipIds);
-    const found = new Set((data||[]).map(r=>r.shipment_id));
+    const data = await fetchAllRows('shipments', 'shipment_id', q=>q.in('shipment_id', shipIds));
+    const found = new Set(data.map(r=>r.shipment_id));
     shipIds.forEach(s=>{ if(!found.has(s)) bad.push('Shipment:'+s); });
   }
   return bad;
