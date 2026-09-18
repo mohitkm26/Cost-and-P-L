@@ -248,6 +248,7 @@
       <div class="tablewrap" style="max-height:200px;"><table class="data" id="mline-table"><thead><tr><th>Group</th><th>Header</th><th class="num">Amount</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
     <div id="mm-preview"></div>
+    <div id="mm-unmatched-panel" style="display:none;"></div>
     <div class="row-actions"><button class="btn teal" id="btn-create-mm-invoice" disabled>Create &amp; tag (fix sum mismatch first)</button></div>
     <div id="mm-status" class="small" style="margin-top:6px;"></div>
   </div>
@@ -1092,6 +1093,53 @@ async function getFXRate(currency){
 
 /* ============================= MULTI-MAWB BATCH UPLOAD ============================= */
 let pendingMMFile = null, pendingMMRows = null;
+let pendingMMUnmatchedGroups = [], pendingMMResolvedLOBs = {};
+function renderMMUnmatchedLobPanel(){
+  const panel = document.getElementById('mm-unmatched-panel');
+  if(!pendingMMUnmatchedGroups.length){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  panel.innerHTML = `<div class="note warn">
+    <b>${pendingMMUnmatchedGroups.length} group(s) not found.</b> Select a batch, assign the LOB the cost should land in, and repeat until all are assigned. A placeholder is created for each — a MAWB gets one lump record flagged as an unallocated-MAWB anomaly (for RCA), a Shipment ID gets a normal placeholder shipment.
+    <label style="display:block;margin-top:6px;"><input type="checkbox" id="mm-unmatched-select-all"> Select all</label>
+    <div style="max-height:180px;overflow:auto;margin:6px 0;">${pendingMMUnmatchedGroups.map(k=>`<label style="display:block;"><input type="checkbox" class="mm-unmatched-check" value="${k}"> ${k}</label>`).join('')}</div>
+    <div class="row-actions"><input type="text" id="mm-unmatched-lob-input" placeholder="LOB for selected" style="max-width:220px;"><button class="btn teal btn-sm" id="mm-unmatched-assign">Assign LOB to selected &amp; continue</button></div>
+  </div>`;
+  document.getElementById('mm-unmatched-select-all').addEventListener('change', e=>{
+    panel.querySelectorAll('.mm-unmatched-check').forEach(c=>c.checked = e.target.checked);
+  });
+  document.getElementById('mm-unmatched-assign').addEventListener('click', ()=>{
+    const selected = [...panel.querySelectorAll('.mm-unmatched-check:checked')].map(c=>c.value);
+    const lob = document.getElementById('mm-unmatched-lob-input').value.trim();
+    if(!selected.length || !lob){ alert('Select at least one group and enter a LOB.'); return; }
+    selected.forEach(k=>{ pendingMMResolvedLOBs[k] = lob; });
+    pendingMMUnmatchedGroups = pendingMMUnmatchedGroups.filter(k=>!selected.includes(k));
+    if(pendingMMUnmatchedGroups.length) renderMMUnmatchedLobPanel();
+    else renderMMPreview(); // re-validate now that everything has a LOB — enables Create
+  });
+}
+// Creates the placeholder shipment records for whatever was assigned a LOB above, right
+// before invoice creation proceeds. A MAWB placeholder is a single synthetic shipment
+// carrying that MAWB (so the existing MAWB-grain matching finds exactly it — the whole
+// invoice amount lands on this one record, correctly reflecting there's nothing real to
+// apportion across) and an explicit attribute flagging it as an anomaly for RCA.
+async function createMMPlaceholderShipments(){
+  const entries = Object.entries(pendingMMResolvedLOBs);
+  if(!entries.length) return;
+  const placeholderRows = [], attrRows = [];
+  entries.forEach(([key, lob])=>{
+    const [type, value] = [key.slice(0,key.indexOf(':')), key.slice(key.indexOf(':')+1)];
+    if(type==='Shipment'){
+      placeholderRows.push({shipment_id: value, lob});
+    } else if(type==='MAWB'){
+      const syntheticId = `MAWB-ANOMALY-${value}`;
+      placeholderRows.push({shipment_id: syntheticId, lob, mawb: value});
+      attrRows.push({shipment_id: syntheticId, attribute_name: 'Anomaly', value: `Unallocated MAWB cost — invoice received for MAWB ${value} with no matching shipments on file`});
+    }
+  });
+  if(placeholderRows.length){ const { error } = await sbClient.from('shipments').insert(placeholderRows); if(error) console.error('Placeholder shipment creation failed:', error.message); }
+  if(attrRows.length){ await sbClient.from('shipment_attributes').upsert(attrRows, {onConflict:'shipment_id,attribute_name'}); }
+  pendingMMResolvedLOBs = {}; pendingMMUnmatchedGroups = [];
+}
 function populateMlineHeaderOptions(){
   document.getElementById('mline-header').innerHTML = document.getElementById('oi-header').innerHTML;
 }
@@ -1202,12 +1250,21 @@ async function renderMMPreview(){
   } else {
     html += `<div class="note integration">Sum matches exactly. Checking group keys against real shipments…</div>`;
     btn.disabled = true;
-    const badKeys = await checkGroupsExist(pendingMMRows);
-    if(badKeys.length){
-      html += `<div class="note err">Blocked: these groups match zero shipments — fix before creating: ${badKeys.join(', ')}</div>`;
+    box.innerHTML = html;
+    const badKeys = await checkGroupsExist(pendingMMRows); // e.g. ['MAWB:X','Shipment:Y']
+    // An invoice arriving for a MAWB/Shipment that was never properly planned is an
+    // operational error to flag, not a reason to refuse the invoice — assign a LOB and
+    // create a placeholder so the cost still lands somewhere real for RCA, same
+    // philosophy as the Last Mile box-detail upload's unmatched-shipment handling.
+    pendingMMUnmatchedGroups = badKeys.filter(k => !(k in pendingMMResolvedLOBs));
+    if(pendingMMUnmatchedGroups.length){
+      html = html.replace('Checking group keys against real shipments…',
+        `${badKeys.length} group(s) matched zero shipments. Assign each a LOB below so the cost still lands somewhere real instead of blocking the invoice.`);
       btn.disabled = true;
+      renderMMUnmatchedLobPanel();
     } else {
-      html = html.replace('Checking group keys against real shipments…', `Every group matched real shipments. Ready to create — ${pendingMMRows.length} lines across ${groupCount} group(s), each independently lockable and actionable.`);
+      html = html.replace('Checking group keys against real shipments…', `Every group matched real shipments (or has a LOB assigned for a placeholder). Ready to create — ${pendingMMRows.length} lines across ${groupCount} group(s), each independently lockable and actionable.`);
+      document.getElementById('mm-unmatched-panel').style.display = 'none';
       btn.disabled = false;
     }
   }
@@ -1247,6 +1304,10 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   if(!vendor || !sourceFile || !pendingMMRows || !pendingMMRows.length){ statusEl.textContent = 'Vendor, source document, and a valid line-item file are required.'; return; }
   const lockCheck = await checkEntryDate(entryDate);
   if(!lockCheck.ok){ statusEl.textContent = lockCheck.message; return; }
+  if(Object.keys(pendingMMResolvedLOBs).length){
+    statusEl.textContent = 'Creating placeholder shipment(s) for unmatched groups…';
+    await createMMPlaceholderShipments();
+  }
   await ensureVendor(vendor);
   statusEl.textContent = 'Uploading source document…';
   const sourcePath = await uploadDoc(sourceFile, 'other-header');
@@ -1428,7 +1489,22 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   if(!lockCheck.ok){ statusEl.textContent = lockCheck.message; return; }
   statusEl.textContent = 'Checking the group key matches real shipments…';
   const precheck = await getGroupProvisionalSum(header, groupType, groupKey);
-  if(!precheck.shipmentIds.length){ statusEl.textContent = `Blocked: no shipments found for ${groupType} = "${groupKey}". Fix the group key before this can be created — an invoice can't be tagged against nothing.`; return; }
+  if(!precheck.shipmentIds.length){
+    // Same philosophy as the batch path: an invoice for a MAWB/Shipment that was never
+    // properly planned is an operational error to flag via a placeholder + LOB, not a
+    // reason to refuse the invoice outright.
+    const lob = prompt(`No shipments found for ${groupType} = "${groupKey}". This usually means it was never properly planned. Enter the LOB this cost should land in to create a placeholder and proceed (or Cancel to fix the group key instead):`);
+    if(!lob || !lob.trim()){ statusEl.textContent = 'Cancelled — fix the group key, or provide a LOB to create a placeholder.'; return; }
+    if(groupType==='SHIPMENT'){
+      const { error: phErr } = await sbClient.from('shipments').insert({shipment_id: groupKey, lob: lob.trim()});
+      if(phErr){ statusEl.textContent = 'Could not create placeholder shipment: '+phErr.message; return; }
+    } else if(groupType==='MAWB'){
+      const syntheticId = `MAWB-ANOMALY-${groupKey}`;
+      const { error: phErr } = await sbClient.from('shipments').insert({shipment_id: syntheticId, lob: lob.trim(), mawb: groupKey});
+      if(phErr){ statusEl.textContent = 'Could not create placeholder shipment: '+phErr.message; return; }
+      await sbClient.from('shipment_attributes').upsert({shipment_id: syntheticId, attribute_name:'Anomaly', value:`Unallocated MAWB cost — invoice received for MAWB ${groupKey} with no matching shipments on file`}, {onConflict:'shipment_id,attribute_name'});
+    }
+  }
   statusEl.textContent = 'Checking for duplicate invoice number…';
   await ensureVendor(vendor);
   let duplicateOf = null;
