@@ -1656,13 +1656,23 @@ async function bulkActOnTags(invoiceId, tagIds, action){
   const dupeWarning = inv.duplicate_of_invoice_id ? ` This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id} — confirm you've checked that before proceeding.` : '';
   if(!confirm(`${action==='accept'?'Accept':'Flag for dispute'} ${tagIds.length} line(s)? This runs each one individually and cannot be undone once started.${dupeWarning}`)) return;
   let done = 0, failed = 0;
+  const failureReasons = []; // was previously discarded entirely — a partial failure gave
+  // no way to know WHY, only a count. Now each real reason is captured and shown, so a
+  // repeat failure across many lines (e.g. a systemic write issue) is diagnosable instead
+  // of looking identical to a handful of unrelated one-off problems.
   for(const tagId of tagIds){
     try{
       if(action==='accept') await acceptTagSilent(tagId, invoiceId); else await disputeTagSilent(tagId, invoiceId);
       done++;
-    }catch(e){ failed++; }
+    }catch(e){ failed++; failureReasons.push(e.message); }
   }
-  alert(`Done: ${done} succeeded${failed?`, ${failed} failed (check each line individually)`:''}.`);
+  let msg = `Done: ${done} succeeded${failed?`, ${failed} failed`:''}.`;
+  if(failureReasons.length){
+    const uniqueReasons = [...new Set(failureReasons)];
+    msg += `\n\nFailure reason(s):\n` + uniqueReasons.slice(0,5).map(r=>`• ${r}`).join('\n') + (uniqueReasons.length>5 ? `\n…and ${uniqueReasons.length-5} more distinct reason(s) — check console for the full list.` : '');
+    console.error(`bulkActOnTags: ${failed} failure(s) for invoice ${invoiceId}:`, failureReasons);
+  }
+  alert(msg);
   await loadOtherInvoices(); await loadReviewQueue();
   const slot = document.getElementById('detail-'+invoiceId); if(slot){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
 }
