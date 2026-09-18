@@ -1484,13 +1484,51 @@ async function refreshInvoicePreview(){
 async function computeInvoiceSummary(invoiceId){
   const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
   const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
+  const allTags = tags||[];
+  // SHIPMENT-grain tags (one shipment per group, e.g. Aggregation) never need the full
+  // group-resolution lookup — answerable from two batched queries regardless of how many
+  // thousand there are, instead of one getGroupProvisionalSum call per tag. This was the
+  // real cause of "View detail" taking a very long time on a 7,075-line invoice.
+  const shipmentTags = allTags.filter(t=>t.group_type==='SHIPMENT');
+  const otherTags = allTags.filter(t=>t.group_type!=='SHIPMENT');
   const tagSummaries = [];
-  for(const tag of tags||[]){
-    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
-    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
-    const variance = actual - summary.sum;
-    const pct = summary.sum!==0 ? (variance/summary.sum*100) : (actual!==0?100:0);
-    tagSummaries.push({tag, summary, actual, variance, pct, totalW: summary.totalWeight});
+  if(shipmentTags.length){
+    const shipIds = [...new Set(shipmentTags.map(t=>t.group_key))];
+    const existingShipments = new Set();
+    for(const chunk of chunkArray(shipIds,300)){
+      const data = await fetchAllRows('shipments','shipment_id', q=>q.in('shipment_id', chunk));
+      data.forEach(r=>existingShipments.add(r.shipment_id));
+    }
+    const provMap = new Map(); // `${shipment_id}|${cost_header}` -> provisional_amount
+    for(const chunk of chunkArray(shipIds,300)){
+      const data = await fetchAllRows('shipment_costs','shipment_id, cost_header, provisional_amount', q=>q.in('shipment_id', chunk));
+      data.forEach(r=> provMap.set(`${r.shipment_id}|${r.cost_header}`, r.provisional_amount||0));
+    }
+    shipmentTags.forEach(tag=>{
+      const exists = existingShipments.has(tag.group_key);
+      const prov = provMap.get(`${tag.group_key}|${tag.cost_header}`) || 0;
+      const summary = exists
+        ? {sum:prov, shipmentIds:[tag.group_key], weights:{[tag.group_key]:0}, totalWeight:0, provByShipment:{[tag.group_key]:prov}}
+        : {sum:0, shipmentIds:[], weights:{}, totalWeight:0, provByShipment:{}};
+      const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+      const variance = actual - summary.sum;
+      const pct = summary.sum!==0 ? (variance/summary.sum*100) : (actual!==0?100:0);
+      tagSummaries.push({tag, summary, actual, variance, pct, totalW: summary.totalWeight});
+    });
+  }
+  // MAWB-grain tags can genuinely span many shipments each and still need the full
+  // resolution — run with bounded concurrency (not sequential, not unbounded) so a large
+  // batch is fast without risking the connection-pool exhaustion seen at higher concurrency.
+  const CONCURRENCY = 15;
+  for(const chunk of chunkArray(otherTags, CONCURRENCY)){
+    const results = await Promise.all(chunk.map(async tag=>{
+      const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
+      const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
+      const variance = actual - summary.sum;
+      const pct = summary.sum!==0 ? (variance/summary.sum*100) : (actual!==0?100:0);
+      return {tag, summary, actual, variance, pct, totalW: summary.totalWeight};
+    }));
+    tagSummaries.push(...results);
   }
   const allIds = [...new Set(tagSummaries.flatMap(t=>t.summary.shipmentIds))];
   const lobMap = {};
