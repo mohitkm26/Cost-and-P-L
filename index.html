@@ -1620,6 +1620,30 @@ async function lockGroupCosts(header, groupType, groupKey, invoiceId){
   }
 }
 
+// Read-only version of bulkAcceptTags' internals — same fast batched approach (shipment-
+// grain via 2 batched queries, MAWB-grain via bounded concurrency), just summing instead
+// of writing. Shared so the card summary and the actual accept action can never disagree.
+async function computeTagsProvisionalTotal(tags){
+  const shipmentTags = tags.filter(t=>t.group_type==='SHIPMENT');
+  const otherTags = tags.filter(t=>t.group_type!=='SHIPMENT');
+  let total = 0;
+  if(shipmentTags.length){
+    const shipIds = [...new Set(shipmentTags.map(t=>t.group_key))];
+    const provMap = new Map();
+    for(const chunk of chunkArray(shipIds,300)){
+      const data = await fetchAllRows('shipment_costs','shipment_id, cost_header, provisional_amount', q=>q.in('shipment_id', chunk));
+      data.forEach(r=> provMap.set(`${r.shipment_id}|${r.cost_header}`, r.provisional_amount||0));
+    }
+    shipmentTags.forEach(t=> total += provMap.get(`${t.group_key}|${t.cost_header}`) || 0);
+  }
+  if(otherTags.length){
+    for(const chunk of chunkArray(otherTags, 15)){
+      const results = await Promise.all(chunk.map(t=> getGroupProvisionalSum(t.cost_header, t.group_type, t.group_key)));
+      results.forEach(s=> total += s.sum);
+    }
+  }
+  return total;
+}
 async function loadOtherInvoices(){
   const { data } = await sbClient.from('invoices').select('*, invoice_tags(*)').order('created_at', {ascending:false}).limit(30);
   const wrap = document.getElementById('oi-list');
@@ -1628,19 +1652,33 @@ async function loadOtherInvoices(){
   // even though it's very much a real, broken record someone needs to see and cancel.
   const others = (data||[]).filter(i=> i.invoice_tags.some(t=>t.cost_header!=='LM') || i.taxable_amount!==0);
   if(!others.length){ wrap.innerHTML = '<div class="emptystate">None yet.</div>'; return; }
-  wrap.innerHTML = others.map(inv=>invoiceCardHTML(inv)).join('');
+  wrap.innerHTML = others.map(inv=>invoiceCardHTML(inv, null)).join(''); // render immediately with a loading placeholder for the totals
   wireInvoiceCardActions(wrap);
+  // Provisional totals fetched per-invoice after the initial render, so the list appears
+  // instantly and totals fill in shortly after, rather than blocking the whole list on
+  // every invoice's total being computed first.
+  others.forEach(async inv=>{
+    const lockedTags = (inv.invoice_tags||[]).filter(t=>t.status==='LOCKED');
+    if(!lockedTags.length) return;
+    const total = await computeTagsProvisionalTotal(lockedTags);
+    const el = wrap.querySelector(`[data-prov-total="${inv.id}"]`);
+    if(el) el.textContent = fmt(total);
+  });
 }
 function invoiceCardHTML(inv){
   const tagCount = (inv.invoice_tags||[]).length;
+  const lockedTags = (inv.invoice_tags||[]).filter(t=>t.status==='LOCKED');
+  const totalInvoiced = (inv.invoice_tags||[]).reduce((s,t)=> s + (t.entered_amount!=null ? t.entered_amount : inv.taxable_amount), 0);
   return `<div class="invcard" data-inv="${inv.id}">
       <div class="hd"><div class="name">#${inv.id} — ${inv.vendor_code} ${inv.invoice_number||''}</div><span class="status-pill st-${(inv.status||'').toLowerCase()}">${inv.status}</span></div>
-      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''} ${tagCount>1?`· <b>${tagCount} MAWB/header lines</b> — act on each individually below`:''}</div>
+      <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''}</div>
+      ${tagCount>1 ? `<div class="ledgerstrip" style="margin:6px 0;"><div class="cell"><div class="lab">Lines</div><div class="val" style="font-size:16px;">${tagCount}${lockedTags.length<tagCount?` (${lockedTags.length} open)`:''}</div></div><div class="cell"><div class="lab">Provisional (open lines)</div><div class="val" style="font-size:16px;" data-prov-total="${inv.id}">${lockedTags.length?'…':'—'}</div></div><div class="cell"><div class="lab">Invoiced (all lines)</div><div class="val" style="font-size:16px;">${fmt(totalInvoiced)}</div></div></div>` : ''}
       ${tagCount===0 ? `<div class="note err">This invoice has zero tags — the line-item save likely failed during creation. It is not reconciling anything, regardless of what its status says. Cancel it and re-upload.</div>` : ''}
-      <div class="meta">${(inv.invoice_tags||[]).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}</div>
+      <div class="meta">${(inv.invoice_tags||[]).slice(0,20).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}${tagCount>20?` <span class="small">…and ${tagCount-20} more</span>`:''}</div>
       <div class="row-actions">
-        <button class="btn secondary btn-sm act-view-detail">View detail</button>
+        <button class="btn secondary btn-sm act-view-detail">View detail (line by line)</button>
         ${inv.status==='PENDING_REVIEW' && tagCount===1 ? `<button class="btn teal btn-sm act-accept-tag" data-tag="${inv.invoice_tags[0].id}">Accept</button><button class="btn amber btn-sm act-dispute-tag" data-tag="${inv.invoice_tags[0].id}">Flag for dispute</button>` : ''}
+        ${lockedTags.length>1 ? `<button class="btn teal btn-sm act-approve-invoice" data-inv="${inv.id}">Approve entire invoice (${lockedTags.length} line${lockedTags.length===1?'':'s'})</button>` : ''}
       </div>
       <div class="detail-box" id="detail-${inv.id}" style="display:none;"></div>
     </div>`;
@@ -1648,6 +1686,15 @@ function invoiceCardHTML(inv){
 function wireInvoiceCardActions(scope){
   scope.querySelectorAll('.act-view-detail').forEach(b=>b.addEventListener('click', e=> toggleInvoiceDetail(e.target.closest('.invcard').dataset.inv)));
   scope.querySelectorAll('.act-accept-tag').forEach(b=>b.addEventListener('click', e=> acceptTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
+  // Approve straight from the card — no need to open View detail first. Pulls the raw
+  // locked tags directly from what's already loaded (no extra fetch) and runs them
+  // through the same fast bulkAcceptTags path used everywhere else.
+  scope.querySelectorAll('.act-approve-invoice').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.dataset.inv;
+    const { data: inv } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('id', invId).single();
+    const lockedTags = (inv.invoice_tags||[]).filter(t=>t.status==='LOCKED');
+    await bulkAcceptTags(invId, lockedTags);
+  }));
   scope.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
 }
 const DETAIL_SNAPSHOT_CACHE = {}; // invoiceId -> tagSummaries computed when detail was opened — Export and Accept both read from this within one session, so they can never silently diverge from a live re-query in between.
