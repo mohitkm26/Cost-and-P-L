@@ -1770,7 +1770,7 @@ async function bulkAcceptTags(invoiceId, tags){
   const ledgerDate = inv.entry_date || inv.invoice_date || todayISO();
   const shipmentTags = tags.filter(t=>t.group_type==='SHIPMENT');
   const otherTags = tags.filter(t=>t.group_type!=='SHIPMENT');
-  let done = 0, failed = 0; const failureReasons = [];
+  let done = 0, failed = 0, alreadyDone = 0; const failureReasons = [];
 
   if(shipmentTags.length){
     const shipIds = [...new Set(shipmentTags.map(t=>t.group_key))];
@@ -1779,9 +1779,22 @@ async function bulkAcceptTags(invoiceId, tags){
       const data = await fetchAllRows('shipment_costs','shipment_id, cost_header, provisional_amount', q=>q.in('shipment_id', chunk));
       data.forEach(r=> provMap.set(`${r.shipment_id}|${r.cost_header}`, r.provisional_amount||0));
     }
+    // Idempotency guard: a tag already reversed for THIS invoice (a ledger entry already
+    // exists) must never get a second ledger row, even if its invoice_tags status is
+    // somehow still stuck at LOCKED from an interrupted prior attempt — confirmed real:
+    // a partial failure on the tag-status-update step (after shipment_costs/ledger writes
+    // had already succeeded) left tags re-selectable on retry, producing duplicate
+    // reversal events. Only the stuck tag's status gets corrected in that case; nothing
+    // financial gets re-written.
+    const alreadyReversedSet = new Set();
+    for(const chunk of chunkArray(shipIds,300)){
+      const data = await fetchAllRows('provision_ledger','shipment_id, cost_header', q=>q.in('shipment_id', chunk).eq('related_invoice_id', invoiceId).eq('event_type','REVERSED'));
+      data.forEach(r=> alreadyReversedSet.add(`${r.shipment_id}|${r.cost_header}`));
+    }
     const costRows = [], ledgerRows = [], reversedTagIds = [];
     shipmentTags.forEach(t=>{
       const key = `${t.group_key}|${t.cost_header}`;
+      if(alreadyReversedSet.has(key)){ alreadyDone++; reversedTagIds.push(t.id); return; }
       if(!provMap.has(key)){ failed++; failureReasons.push(`${t.group_key} (${HEADER_LABEL[t.cost_header]||t.cost_header}): no provisional record on file`); return; }
       const prov = provMap.get(key), actual = t.entered_amount!=null ? t.entered_amount : inv.taxable_amount;
       costRows.push({shipment_id:t.group_key, cost_header:t.cost_header, provisional_amount:prov, actual_amount:actual, status:'REVERSED'});
@@ -1810,7 +1823,7 @@ async function bulkAcceptTags(invoiceId, tags){
     }
   }
   await checkAndFinalizeInvoiceStatus(invoiceId);
-  let msg = `Done: ${done} succeeded${failed?`, ${failed} failed`:''}.`;
+  let msg = `Done: ${done} succeeded${failed?`, ${failed} failed`:''}.` + (alreadyDone ? ` (${alreadyDone} of those were already reversed from a prior attempt — only their stuck status was corrected, nothing financial was re-written.)` : '');
   if(failureReasons.length){
     const uniqueReasons = [...new Set(failureReasons)];
     msg += `\n\nFailure reason(s):\n` + uniqueReasons.slice(0,5).map(r=>`• ${r}`).join('\n') + (uniqueReasons.length>5 ? `\n…and ${uniqueReasons.length-5} more distinct reason(s) — check console for the full list.` : '');
