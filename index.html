@@ -1289,18 +1289,25 @@ async function checkGroupsExist(rows){
   const mawbs = [...new Set(rows.filter(r=>r.groupType==='MAWB').map(r=>r.groupKey))];
   const shipIds = [...new Set(rows.filter(r=>r.groupType==='SHIPMENT').map(r=>r.groupKey))];
   const bad = [];
-  // fetchAllRows, not a single .select() — a MAWB groups many shipments, so checking 40+
-  // MAWBs at once can return well over 1000 shipment rows and silently truncate, wrongly
-  // reporting a MAWB as "zero shipments" when it's simply outside the truncated window.
-  // Confirmed: 40 of 41 flagged MAWBs genuinely existed before this fix.
+  // Two separate scale problems, both now fixed: (1) fetchAllRows handles a large RESULT
+  // set (a MAWB groups many shipments, so the returned rows can exceed 1000 and silently
+  // truncate). (2) THIS chunking handles a large INPUT list — checking thousands of IDs in
+  // one .in() filter builds an enormous query string that can hang or fail outright,
+  // independent of how many rows come back. Confirmed at 7,075 shipment IDs in one batch.
+  const CHUNK_SIZE = 300;
+  async function findExisting(column, values){
+    const found = new Set();
+    const chunks = chunkArray(values, CHUNK_SIZE);
+    const results = await Promise.all(chunks.map(chunk => fetchAllRows('shipments', column, q=>q.in(column, chunk))));
+    results.forEach(data => data.forEach(r => found.add(r[column])));
+    return found;
+  }
   if(mawbs.length){
-    const data = await fetchAllRows('shipments', 'mawb', q=>q.in('mawb', mawbs));
-    const found = new Set(data.map(r=>r.mawb));
+    const found = await findExisting('mawb', mawbs);
     mawbs.forEach(m=>{ if(!found.has(m)) bad.push('MAWB:'+m); });
   }
   if(shipIds.length){
-    const data = await fetchAllRows('shipments', 'shipment_id', q=>q.in('shipment_id', shipIds));
-    const found = new Set(data.map(r=>r.shipment_id));
+    const found = await findExisting('shipment_id', shipIds);
     shipIds.forEach(s=>{ if(!found.has(s)) bad.push('Shipment:'+s); });
   }
   return bad;
@@ -1335,18 +1342,34 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   if(error){ statusEl.textContent = 'Could not create invoice: '+error.message; return; }
   statusEl.textContent = `Tagging ${pendingMMRows.length} lines…`;
   let tagsSaved = 0, firstTagError = null;
-  for(const r of pendingMMRows){
+  const tagPayloads = pendingMMRows.map(r=>{
     const rate = FX_RATES_CACHE[r.currency] || 1;
-    const convertedAmount = round2(r.originalAmount * rate);
-    const { error: tagErr } = await sbClient.from('invoice_tags').insert({
-      invoice_id:invRow.id, cost_header:r.code, group_type:r.groupType, group_key:r.groupKey,
-      entered_amount:convertedAmount, original_currency:r.currency, original_amount:r.originalAmount, fx_rate_used:rate,
-      status:'LOCKED', tagged_by:CURRENT_USER.id
-    });
-    if(tagErr){ if(!firstTagError) firstTagError = tagErr.message; continue; } // keep going, but never claim success
-    tagsSaved++;
-    await lockGroupCosts(r.code, r.groupType, r.groupKey, invRow.id);
+    return {invoice_id:invRow.id, cost_header:r.code, group_type:r.groupType, group_key:r.groupKey,
+      entered_amount: round2(r.originalAmount * rate), original_currency:r.currency, original_amount:r.originalAmount, fx_rate_used:rate,
+      status:'LOCKED', tagged_by:CURRENT_USER.id};
+  });
+  // Batched inserts (chunks of 500), not one row at a time — a batch of thousands of lines
+  // (e.g. one Aggregation invoice per shipment) was taking an extremely long time as
+  // individual sequential inserts, independent of the separate existence-check scaling fix.
+  for(const chunk of chunkArray(tagPayloads,500)){
+    const { error: tagErr } = await sbClient.from('invoice_tags').insert(chunk);
+    if(tagErr){ if(!firstTagError) firstTagError = tagErr.message; continue; }
+    tagsSaved += chunk.length;
   }
+  statusEl.textContent = `Locking ${tagsSaved} shipment(s)…`;
+  // SHIPMENT-grain groups (one shipment each, e.g. Aggregation) never need the full
+  // getGroupProvisionalSum group-resolution — locking is just "this shipment+header,
+  // OPEN -> LOCKED" and can be batched directly by shipment_id. MAWB-grain groups can
+  // still span many shipments each, so those keep going through the per-group path.
+  const shipmentGroupsByHeader = {};
+  pendingMMRows.filter(r=>r.groupType==='SHIPMENT').forEach(r=>{ (shipmentGroupsByHeader[r.code] = shipmentGroupsByHeader[r.code]||[]).push(r.groupKey); });
+  for(const header in shipmentGroupsByHeader){
+    for(const chunk of chunkArray(shipmentGroupsByHeader[header],200)){
+      await sbClient.from('shipment_costs').update({status:'LOCKED', locked_by_invoice_id:invRow.id}).eq('cost_header',header).in('shipment_id',chunk).eq('status','OPEN');
+    }
+  }
+  const mawbGroups = pendingMMRows.filter(r=>r.groupType==='MAWB');
+  for(const r of mawbGroups){ await lockGroupCosts(r.code, r.groupType, r.groupKey, invRow.id); }
   if(tagsSaved < pendingMMRows.length){
     statusEl.innerHTML = `<span style="color:var(--red);">Only ${tagsSaved} of ${pendingMMRows.length} lines actually saved — invoice #${invRow.id} is INCOMPLETE. First error: ${firstTagError}. Do not treat this invoice as usable — cancel it and re-upload once the underlying issue is fixed.</span>`;
     await loadOtherInvoices(); await loadReviewQueue();
