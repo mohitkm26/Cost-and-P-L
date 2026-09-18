@@ -1699,18 +1699,83 @@ async function toggleInvoiceDetail(invoiceId){
   slot.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, invoiceId)));
   slot.querySelectorAll('.act-export-alloc').forEach(b=>b.addEventListener('click', e=> exportTagAllocation(e.target.dataset.tag, DETAIL_SNAPSHOT_CACHE[invoiceId])));
   slot.querySelectorAll('.act-cancel-invoice').forEach(b=>b.addEventListener('click', e=> cancelInvoice(e.target.dataset.inv)));
+  const tagById = {}; tagSummaries.forEach(t=> tagById[t.tag.id] = t.tag);
   const selectAllBox = document.getElementById(`bulk-select-all-${invoiceId}`);
   if(selectAllBox) selectAllBox.addEventListener('change', e=>{ slot.querySelectorAll('.bulk-line-check').forEach(c=>c.checked = e.target.checked); });
   const bulkAccept = slot.querySelector('.bulk-accept-selected');
-  if(bulkAccept) bulkAccept.addEventListener('click', ()=> bulkActOnTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>c.dataset.tag), 'accept'));
+  if(bulkAccept) bulkAccept.addEventListener('click', ()=> bulkAcceptTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>tagById[c.dataset.tag]).filter(Boolean)));
   const bulkDispute = slot.querySelector('.bulk-dispute-selected');
   if(bulkDispute) bulkDispute.addEventListener('click', ()=> bulkActOnTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>c.dataset.tag), 'dispute'));
   const bulkAll = slot.querySelector('.bulk-accept-invoice');
-  if(bulkAll) bulkAll.addEventListener('click', ()=> bulkActOnTags(invoiceId, lockedTags.filter(t=>t.summary.shipmentIds.length>0).map(t=>String(t.tag.id)), 'accept'));
+  if(bulkAll) bulkAll.addEventListener('click', ()=> bulkAcceptTags(invoiceId, lockedTags.filter(t=>t.summary.shipmentIds.length>0).map(t=>t.tag)));
 }
-// Runs accept/dispute across many lines in one action — reuses the exact same per-tag
-// functions as the individual buttons, just sequentially, so nothing about the underlying
-// write logic (error checking, snapshot consistency, duplicate confirm) changes.
+// True bulk accept for SHIPMENT-grain lines (one shipment per group, e.g. Aggregation) —
+// this is what actually fixes "7,075 lines takes ages": no apportionment math is needed for
+// a single-shipment group (share is always 1), so the whole batch is answered from a couple
+// of batched queries and a handful of chunked writes, not one DB round-trip per line.
+// MAWB-grain lines can genuinely span many shipments and still need the real per-line
+// resolution — those run with bounded concurrency instead, same as the detail-view fetch.
+async function bulkAcceptTags(invoiceId, tags){
+  if(!tags.length){ alert('Nothing selected.'); return; }
+  const { data: inv } = await sbClient.from('invoices').select('duplicate_of_invoice_id, entry_date, invoice_date').eq('id', invoiceId).single();
+  const dupeWarning = inv.duplicate_of_invoice_id ? ` This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id} — confirm you've checked that before proceeding.` : '';
+  if(!confirm(`Accept ${tags.length} line(s)? This cannot be undone once started.${dupeWarning}`)) return;
+  const ledgerDate = inv.entry_date || inv.invoice_date || todayISO();
+  const shipmentTags = tags.filter(t=>t.group_type==='SHIPMENT');
+  const otherTags = tags.filter(t=>t.group_type!=='SHIPMENT');
+  let done = 0, failed = 0; const failureReasons = [];
+
+  if(shipmentTags.length){
+    const shipIds = [...new Set(shipmentTags.map(t=>t.group_key))];
+    const provMap = new Map();
+    for(const chunk of chunkArray(shipIds,300)){
+      const data = await fetchAllRows('shipment_costs','shipment_id, cost_header, provisional_amount', q=>q.in('shipment_id', chunk));
+      data.forEach(r=> provMap.set(`${r.shipment_id}|${r.cost_header}`, r.provisional_amount||0));
+    }
+    const costRows = [], ledgerRows = [], reversedTagIds = [];
+    shipmentTags.forEach(t=>{
+      const key = `${t.group_key}|${t.cost_header}`;
+      if(!provMap.has(key)){ failed++; failureReasons.push(`${t.group_key} (${HEADER_LABEL[t.cost_header]||t.cost_header}): no provisional record on file`); return; }
+      const prov = provMap.get(key), actual = t.entered_amount!=null ? t.entered_amount : inv.taxable_amount;
+      costRows.push({shipment_id:t.group_key, cost_header:t.cost_header, provisional_amount:prov, actual_amount:actual, status:'REVERSED'});
+      ledgerRows.push({shipment_id:t.group_key, cost_header:t.cost_header, event_type:'REVERSED', amount:prov, event_date:ledgerDate, related_invoice_id:invoiceId});
+      reversedTagIds.push(t.id);
+    });
+    let writeFailed = false;
+    for(const chunk of chunkArray(costRows,500)){
+      const { error } = await sbClient.from('shipment_costs').upsert(chunk, {onConflict:'shipment_id,cost_header'});
+      if(error){ writeFailed = true; failureReasons.push('Batched shipment_costs write failed: '+error.message); break; }
+    }
+    if(!writeFailed){
+      for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
+      for(const chunk of chunkArray(reversedTagIds,500)){ await sbClient.from('invoice_tags').update({status:'REVERSED'}).in('id', chunk); }
+      done += reversedTagIds.length;
+      await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `Bulk: ${reversedTagIds.length} shipment-grain line(s)`);
+    } else {
+      failed += costRows.length;
+    }
+  }
+  if(otherTags.length){
+    const CONCURRENCY = 15;
+    for(const chunk of chunkArray(otherTags, CONCURRENCY)){
+      const results = await Promise.all(chunk.map(t=> acceptTagCore(t.id, invoiceId)));
+      results.forEach((r,i)=>{ if(r.ok) done++; else { failed++; failureReasons.push(`${chunk[i].group_key}: ${r.message}`); } });
+    }
+  }
+  await checkAndFinalizeInvoiceStatus(invoiceId);
+  let msg = `Done: ${done} succeeded${failed?`, ${failed} failed`:''}.`;
+  if(failureReasons.length){
+    const uniqueReasons = [...new Set(failureReasons)];
+    msg += `\n\nFailure reason(s):\n` + uniqueReasons.slice(0,5).map(r=>`• ${r}`).join('\n') + (uniqueReasons.length>5 ? `\n…and ${uniqueReasons.length-5} more distinct reason(s) — check console for the full list.` : '');
+    console.error(`bulkAcceptTags: ${failed} failure(s) for invoice ${invoiceId}:`, failureReasons);
+  }
+  alert(msg);
+  delete DETAIL_SNAPSHOT_CACHE[invoiceId];
+  await loadOtherInvoices(); await loadReviewQueue();
+  const slot = document.getElementById('detail-'+invoiceId); if(slot){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+}
+// Bulk DISPUTE (unchanged, one line at a time) — disputing doesn't have the same batching
+// opportunity, since each line's dispute text/reason is meaningfully per-line.
 async function bulkActOnTags(invoiceId, tagIds, action){
   if(!tagIds.length){ alert('Nothing selected.'); return; }
   const { data: inv } = await sbClient.from('invoices').select('duplicate_of_invoice_id').eq('id', invoiceId).single();
