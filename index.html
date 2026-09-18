@@ -925,7 +925,7 @@ async function importShipmentsWithMapping(){
   // OPEN and was skipped purely because the accounting period is locked, which was wrong.
   let skippedForStatus = 0, skippedForLock = 0;
   costRows.forEach(c=>{ const k=`${c.shipment_id}|${c.cost_header}`; if(statusProtectedSet.has(k)) skippedForStatus++; else if(lockProtectedSet.has(k)) skippedForLock++; });
-  let savedCost = 0, failedCostChunks = 0;
+  let savedCost = 0, failedCostChunks = 0, failedLedgerChunks = 0;
   for(const chunk of chunkArray(safeCostRows,500)){
     const { error } = await sbClient.from('shipment_costs').upsert(chunk.map(c=>({...c, status:'OPEN'})), {onConflict:'shipment_id,cost_header', ignoreDuplicates:false});
     if(error){ failedCostChunks++; console.error('Cost chunk failed:', error.message, chunk[0]); continue; }
@@ -942,7 +942,10 @@ async function importShipmentsWithMapping(){
       (pdRows||[]).forEach(r=> pickupMap.set(r.shipment_id, r.pickup_date));
     }
     const ledgerRows = newlyBookedRows.map(r=>({shipment_id:r.shipment_id, cost_header:r.cost_header, event_type:'BOOKED', amount:r.provisional_amount, event_date: pickupMap.get(r.shipment_id) || todayISO()}));
-    for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
+    for(const chunk of chunkArray(ledgerRows,500)){
+      const { error } = await sbClient.from('provision_ledger').insert(chunk);
+      if(error){ failedLedgerChunks++; console.error('BOOKED ledger chunk failed:', error.message); }
+    }
   }
   let savedAttrs = 0, failedAttrChunks = 0;
   for(const chunk of chunkArray(attrRows,500)){
@@ -956,7 +959,7 @@ async function importShipmentsWithMapping(){
     (attrRows.length ? `, ${savedAttrs} of ${attrRows.length} attribute values saved` : '') + `.` +
     (skippedForStatus ? ` ${skippedForStatus} skipped — already locked/reversed by an invoice.` : '') +
     (skippedForLock ? ` ${skippedForLock} skipped — booked in a period that's now locked (through ${lock.locked_through}).` : '') +
-    (failedShipChunks || failedCostChunks || failedAttrChunks ? ` ${failedShipChunks+failedCostChunks+failedAttrChunks} batch(es) failed — check console.` : '');
+    (failedShipChunks || failedCostChunks || failedAttrChunks || failedLedgerChunks ? ` ${failedShipChunks+failedCostChunks+failedAttrChunks+failedLedgerChunks} batch(es) failed — check console.${failedLedgerChunks?' Some newly-booked provisional cost may be missing its ledger event; re-uploading the same file is safe and will retry only what did not book.':''}` : '');
 }
 
 /* ============================= LM BOX UPLOAD ============================= */
@@ -1791,29 +1794,38 @@ async function bulkAcceptTags(invoiceId, tags){
       const data = await fetchAllRows('provision_ledger','shipment_id, cost_header', q=>q.in('shipment_id', chunk).eq('related_invoice_id', invoiceId).eq('event_type','REVERSED'));
       data.forEach(r=> alreadyReversedSet.add(`${r.shipment_id}|${r.cost_header}`));
     }
-    const costRows = [], ledgerRows = [], reversedTagIds = [];
+    const newEntries = []; // {tagId, costRow, ledgerRow} — kept together so success/failure can be tracked per chunk, not assumed
+    let successfulTagIds = [];
     shipmentTags.forEach(t=>{
       const key = `${t.group_key}|${t.cost_header}`;
-      if(alreadyReversedSet.has(key)){ alreadyDone++; reversedTagIds.push(t.id); return; }
+      if(alreadyReversedSet.has(key)){ alreadyDone++; successfulTagIds.push(t.id); return; }
       if(!provMap.has(key)){ failed++; failureReasons.push(`${t.group_key} (${HEADER_LABEL[t.cost_header]||t.cost_header}): no provisional record on file`); return; }
       const prov = provMap.get(key), actual = t.entered_amount!=null ? t.entered_amount : inv.taxable_amount;
-      costRows.push({shipment_id:t.group_key, cost_header:t.cost_header, provisional_amount:prov, actual_amount:actual, status:'REVERSED'});
-      ledgerRows.push({shipment_id:t.group_key, cost_header:t.cost_header, event_type:'REVERSED', amount:prov, event_date:ledgerDate, related_invoice_id:invoiceId});
-      reversedTagIds.push(t.id);
+      newEntries.push({
+        tagId: t.id,
+        costRow: {shipment_id:t.group_key, cost_header:t.cost_header, provisional_amount:prov, actual_amount:actual, status:'REVERSED'},
+        ledgerRow: {shipment_id:t.group_key, cost_header:t.cost_header, event_type:'REVERSED', amount:prov, event_date:ledgerDate, related_invoice_id:invoiceId}
+      });
     });
-    let writeFailed = false;
-    for(const chunk of chunkArray(costRows,500)){
-      const { error } = await sbClient.from('shipment_costs').upsert(chunk, {onConflict:'shipment_id,cost_header'});
-      if(error){ writeFailed = true; failureReasons.push('Batched shipment_costs write failed: '+error.message); break; }
+    // Per chunk: shipment_costs, THEN provision_ledger, THEN only flip invoice_tags status
+    // for entries whose ledger write actually succeeded — never assumed. If the ledger
+    // write fails after shipment_costs already succeeded, that specific tag stays LOCKED
+    // (safe, self-healing on retry) rather than getting marked done with no ledger trace,
+    // which is exactly the second bug this fixes: ~2,700 lines on a prior invoice were
+    // marked REVERSED with NO corresponding ledger entry at all, because this insert's
+    // error was previously never checked before the status update ran anyway.
+    for(const chunk of chunkArray(newEntries,500)){
+      const { error: scErr } = await sbClient.from('shipment_costs').upsert(chunk.map(e=>e.costRow), {onConflict:'shipment_id,cost_header'});
+      if(scErr){ failed += chunk.length; failureReasons.push('Batched shipment_costs write failed: '+scErr.message); continue; }
+      const { error: plErr } = await sbClient.from('provision_ledger').insert(chunk.map(e=>e.ledgerRow));
+      if(plErr){ failed += chunk.length; failureReasons.push('Batched provision_ledger write failed: '+plErr.message+' — shipment_costs was updated but the tag was left LOCKED so this chunk is safe to retry.'); continue; }
+      successfulTagIds.push(...chunk.map(e=>e.tagId));
     }
-    if(!writeFailed){
-      for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
-      for(const chunk of chunkArray(reversedTagIds,500)){ await sbClient.from('invoice_tags').update({status:'REVERSED'}).in('id', chunk); }
-      done += reversedTagIds.length;
-      await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `Bulk: ${reversedTagIds.length} shipment-grain line(s)`);
-    } else {
-      failed += costRows.length;
+    for(const idChunk of chunkArray(successfulTagIds,500)){
+      await sbClient.from('invoice_tags').update({status:'REVERSED'}).in('id', idChunk);
     }
+    done += successfulTagIds.length;
+    if(successfulTagIds.length) await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `Bulk: ${successfulTagIds.length} shipment-grain line(s)`);
   }
   if(otherTags.length){
     const CONCURRENCY = 15;
@@ -1916,7 +1928,10 @@ async function acceptTagCore(tagId, invoiceId){
     if(scErr) return {ok:false, message:`Failed writing shipment ${sid}: ${scErr.message}. Nothing further was written for this line — safe to retry.`};
     ledgerRows.push({shipment_id:sid, cost_header:tag.cost_header, event_type:'REVERSED', amount:prov, event_date:ledgerDate, related_invoice_id:invoiceId});
   }
-  for(const chunk of chunkArray(ledgerRows,500)){ await sbClient.from('provision_ledger').insert(chunk); }
+  for(const chunk of chunkArray(ledgerRows,500)){
+    const { error: plErr } = await sbClient.from('provision_ledger').insert(chunk);
+    if(plErr) return {ok:false, message:`Shipment costs were updated but the ledger write failed: ${plErr.message}. The tag was left LOCKED (not marked done) so this is safe to retry.`};
+  }
   const { error: tagErr } = await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tagId);
   if(tagErr) return {ok:false, message:`Shipment costs were updated, but marking this line as done failed: ${tagErr.message}. Re-running Accept on this line is safe, it will just recompute the same figures.`};
   await logAction(invoiceId, 'LINE_ACCEPTED', CURRENT_USER.id, `${HEADER_LABEL[tag.cost_header]||tag.cost_header} · ${tag.group_type}:${tag.group_key}`);
