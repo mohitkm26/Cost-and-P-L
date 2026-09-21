@@ -1695,16 +1695,30 @@ function invoiceCardHTML(inv){
       <div class="meta">Taxable: ${fmt(inv.taxable_amount)} ${inv.currency} ${inv.duplicate_of_invoice_id?`· <span style="color:var(--red)">possible duplicate of #${inv.duplicate_of_invoice_id}</span>`:''}</div>
       ${tagCount>1 ? `<div class="ledgerstrip" style="margin:6px 0;"><div class="cell"><div class="lab">Lines</div><div class="val" style="font-size:16px;">${tagCount}${lockedTags.length<tagCount?` (${lockedTags.length} open)`:''}</div></div><div class="cell"><div class="lab">Provisional (open lines)</div><div class="val" style="font-size:16px;" data-prov-total="${inv.id}">${lockedTags.length?'…':'—'}</div></div><div class="cell"><div class="lab">Invoiced (all lines)</div><div class="val" style="font-size:16px;">${fmt(totalInvoiced)}</div></div></div>` : ''}
       ${tagCount===0 ? `<div class="note err">This invoice has zero tags — the line-item save likely failed during creation. It is not reconciling anything, regardless of what its status says. Cancel it and re-upload.</div>` : ''}
+      ${lockedTags.length>0 ? `<div class="note warn">${lockedTags.length} line(s) still LOCKED — either never matched a provisional record, or the initial accept didn't finish for them. These do not silently resolve on their own.</div>` : ''}
       <div class="meta">${(inv.invoice_tags||[]).slice(0,20).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}${tagCount>20?` <span class="small">…and ${tagCount-20} more</span>`:''}</div>
       <div class="row-actions">
         <button class="btn secondary btn-sm act-view-detail">View detail (line by line)</button>
         ${inv.status==='PENDING_REVIEW' && tagCount===1 ? `<button class="btn amber btn-sm act-dispute-tag" data-tag="${inv.invoice_tags[0].id}">Flag for dispute</button>` : ''}
+        ${lockedTags.length>0 ? `<button class="btn teal btn-sm act-process-remaining" data-inv="${inv.id}">Process remaining ${lockedTags.length} locked line${lockedTags.length===1?'':'s'}</button>` : ''}
       </div>
       <div class="detail-box" id="detail-${inv.id}" style="display:none;"></div>
     </div>`;
 }
 function wireInvoiceCardActions(scope){
   scope.querySelectorAll('.act-view-detail').forEach(b=>b.addEventListener('click', e=> toggleInvoiceDetail(e.target.closest('.invcard').dataset.inv)));
+  // Temporary, narrowly-scoped cleanup action — not the full Approve UI (removed per
+  // instruction, to be rebuilt properly later). Only ever touches lines genuinely still
+  // LOCKED, reusing the same hardened bulkAcceptTagsSilent path as everywhere else, so
+  // nothing that already succeeded is ever re-processed.
+  scope.querySelectorAll('.act-process-remaining').forEach(b=>b.addEventListener('click', async e=>{
+    const invId = e.target.dataset.inv;
+    e.target.disabled = true; e.target.textContent = 'Processing…';
+    const lockedNow = await fetchAllRows('invoice_tags', '*', q=>q.eq('invoice_id', invId).eq('status','LOCKED'));
+    const result = await bulkAcceptTagsSilent(invId, lockedNow);
+    alert(`Processed ${lockedNow.length} line(s): ${result.done} succeeded${result.failed?`, ${result.failed} failed — ${[...new Set(result.failureReasons)].slice(0,3).join('; ')}`:''}.`);
+    await loadOtherInvoices(); await loadReviewQueue();
+  }));
   scope.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
 }
 const DETAIL_SNAPSHOT_CACHE = {}; // invoiceId -> tagSummaries computed when detail was opened — Export and Accept both read from this within one session, so they can never silently diverge from a live re-query in between.
