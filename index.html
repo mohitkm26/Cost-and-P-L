@@ -1384,7 +1384,7 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
   // including its idempotency guard and atomic status finalization), rather than leaving
   // lines LOCKED for a separate manual review/approve action.
   statusEl.textContent = `Invoice #${invRow.id} created. Reversing provisions for ${pendingMMRows.length} lines…`;
-  const { data: freshTags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invRow.id).eq('status','LOCKED');
+  const freshTags = await fetchAllRows('invoice_tags', '*', q=>q.eq('invoice_id', invRow.id).eq('status','LOCKED'));
   await bulkAcceptTagsSilent(invRow.id, freshTags||[]);
   statusEl.textContent = `Invoice #${invRow.id} created and processed — ${pendingMMRows.length} lines.`;
   pendingMMRows = null; document.getElementById('mm-preview').innerHTML='';
