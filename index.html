@@ -1894,13 +1894,16 @@ function exportTagAllocation(tagId, tagSummaries){
   XLSX.utils.book_append_sheet(wb, ws, 'Allocation');
   XLSX.writeFile(wb, `allocation_${t.tag.group_key}_${t.tag.cost_header}.xlsx`);
 }
+// Was client-side "read all tag statuses, then decide, then write" — a classic
+// check-then-act race: if called more than once in close succession (a double-click, an
+// overlapping retry from an interrupted earlier attempt), one call could act on a stale
+// read. Confirmed happening for real: an invoice was found APPROVED with 3,191 of 7,075
+// lines still LOCKED. Now calls a Postgres function that makes "no LOCKED tags remain"
+// part of the WRITE itself, atomically — it cannot be fooled by timing regardless of how
+// many times or how close together this gets called.
 async function checkAndFinalizeInvoiceStatus(invoiceId){
-  const { data: tags } = await sbClient.from('invoice_tags').select('status').eq('invoice_id', invoiceId);
-  if(!tags || !tags.length){ console.error(`checkAndFinalizeInvoiceStatus called for invoice ${invoiceId} with zero tags — refusing to approve an invoice with nothing behind it.`); return; }
-  const anyLocked = tags.some(t=>t.status==='LOCKED');
-  const anyDisputed = tags.some(t=>t.status==='DISPUTED');
-  if(anyLocked) return; // still work to do, leave as PENDING_REVIEW
-  await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
+  const { error } = await sbClient.rpc('finalize_invoice_status', {inv_id: invoiceId});
+  if(error) console.error('finalize_invoice_status failed:', error.message);
 }
 // Core logic shared by the single-line buttons and the bulk (silent) path — returns
 // {ok, message} instead of alerting, so bulk operations can count successes/failures
@@ -2006,25 +2009,6 @@ async function cancelInvoice(invoiceId){
   await sbClient.from('invoices').update({status:'CANCELLED'}).eq('id', invoiceId);
   await logAction(invoiceId, 'CANCELLED', CURRENT_USER.id, 'Invoice cancelled, locks released');
   await loadOtherInvoices(); await loadLMInvoiceGroups(); await loadReviewQueue();
-}
-async function finalizeApproval(invoiceId){
-  const { data: tags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invoiceId);
-  const { data: inv } = await sbClient.from('invoices').select('*').eq('id', invoiceId).single();
-  for(const tag of tags){
-    const summary = await getGroupProvisionalSum(tag.cost_header, tag.group_type, tag.group_key);
-    const actual = tag.entered_amount!=null ? tag.entered_amount : inv.taxable_amount;
-    const variance = actual - summary.sum;
-    const totalW = summary.totalWeight || Object.values(summary.weights).reduce((a,b)=>a+b,0);
-    for(const sid of summary.shipmentIds){
-      const { data: sc } = await sbClient.from('shipment_costs').select('*').eq('shipment_id', sid).eq('cost_header', tag.cost_header).maybeSingle();
-      const prov = sc ? sc.provisional_amount : 0;
-      const share = totalW>0 ? (summary.weights[sid]||0)/totalW : 1/summary.shipmentIds.length;
-      const shipmentActual = prov + share*variance;
-      await sbClient.from('shipment_costs').upsert({shipment_id:sid, cost_header:tag.cost_header, provisional_amount:prov, actual_amount:shipmentActual, status:'REVERSED'}, {onConflict:'shipment_id,cost_header'});
-    }
-    await sbClient.from('invoice_tags').update({status:'REVERSED'}).eq('id', tag.id);
-  }
-  await sbClient.from('invoices').update({status:'APPROVED'}).eq('id', invoiceId);
 }
 /* ============================= LAST MILE INVOICES ============================= */
 document.getElementById('btn-new-lm-invgroup').addEventListener('click', async ()=>{
@@ -2287,12 +2271,8 @@ async function disputeLMTagSilent(tagId, invoiceId){
   if(!result.ok) throw new Error(result.message);
 }
 async function checkAndFinalizeLMInvoiceStatus(invoiceId){
-  const { data: tags } = await sbClient.from('lm_invoice_tags').select('status').eq('invoice_id', invoiceId);
-  if(!tags || !tags.length){ console.error(`checkAndFinalizeLMInvoiceStatus called for invoice ${invoiceId} with zero tags — refusing to approve.`); return; }
-  const anyLocked = tags.some(t=>t.status==='LOCKED');
-  const anyDisputed = tags.some(t=>t.status==='DISPUTED');
-  if(anyLocked) return;
-  await sbClient.from('invoices').update({status: anyDisputed ? 'DISPUTED' : 'APPROVED'}).eq('id', invoiceId);
+  const { error } = await sbClient.rpc('finalize_lm_invoice_status', {inv_id: invoiceId});
+  if(error) console.error('finalize_lm_invoice_status failed:', error.message);
 }
 document.getElementById('btn-run-lm-recon').addEventListener('click', async ()=>{
   const { data: boxes } = await sbClient.from('box_lm_costs').select('*');
