@@ -1379,7 +1379,14 @@ document.getElementById('btn-create-mm-invoice').addEventListener('click', async
     return;
   }
   await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, `Multi-MAWB batch: ${pendingMMRows.length} lines`);
-  statusEl.textContent = `Invoice #${invRow.id} created with ${pendingMMRows.length} lines. Review each line individually under "View detail".`;
+  // Approve step removed for now, per explicit instruction — creation itself runs the full
+  // accept immediately (reusing the same hardened bulkAcceptTags path used everywhere else,
+  // including its idempotency guard and atomic status finalization), rather than leaving
+  // lines LOCKED for a separate manual review/approve action.
+  statusEl.textContent = `Invoice #${invRow.id} created. Reversing provisions for ${pendingMMRows.length} lines…`;
+  const { data: freshTags } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invRow.id).eq('status','LOCKED');
+  await bulkAcceptTagsSilent(invRow.id, freshTags||[]);
+  statusEl.textContent = `Invoice #${invRow.id} created and processed — ${pendingMMRows.length} lines.`;
   pendingMMRows = null; document.getElementById('mm-preview').innerHTML='';
   ['mm-vendor','mm-invnum','mm-amount'].forEach(id=>document.getElementById(id).value='');
   await loadOtherInvoices(); await loadReviewQueue();
@@ -1605,12 +1612,23 @@ document.getElementById('btn-create-other-invoice').addEventListener('click', as
   const { error: tagErr } = await sbClient.from('invoice_tags').insert({
     invoice_id: invRow.id, cost_header: header, group_type: groupType, group_key: groupKey,
     entered_amount: enteredAmt, status:'LOCKED', tagged_by: CURRENT_USER.id
-  });
+  }).select().single();
   if(tagErr){ statusEl.innerHTML = `<span style="color:var(--red);">Invoice #${invRow.id} was created but tagging failed: ${tagErr.message}. This invoice is INCOMPLETE — cancel it rather than trying to use it.</span>`; await loadOtherInvoices(); await loadReviewQueue(); return; }
   await lockGroupCosts(header, groupType, groupKey, invRow.id);
   await logAction(invRow.id, 'ENTERED', CURRENT_USER.id, null);
 
-  statusEl.textContent = `Invoice #${invRow.id} created and tagged.` + (duplicateOf ? ` NOTE: vendor+invoice number matches invoice #${duplicateOf} — flagged for review.` : '') + ' Awaiting review.';
+  // Submit does everything now — no separate manual Approve step. A flagged duplicate is
+  // the one case still worth a real checkpoint: the invoice and its lock are created
+  // either way (no data entry lost), but auto-accept only proceeds once confirmed.
+  let acceptedNote = '';
+  if(!duplicateOf || confirm(`This invoice's vendor+number matches invoice #${duplicateOf} — a possible duplicate. Proceed with accepting it anyway?`)){
+    const { data: freshTag } = await sbClient.from('invoice_tags').select('*').eq('invoice_id', invRow.id).single();
+    const result = await bulkAcceptTagsSilent(invRow.id, [freshTag]);
+    acceptedNote = result.failed ? ` Accept failed: ${result.failureReasons[0]||'unknown reason'} — check console.` : ' Accepted automatically.';
+  } else {
+    acceptedNote = ' Left pending (not auto-accepted) because of the duplicate flag — resolve manually.';
+  }
+  statusEl.textContent = `Invoice #${invRow.id} created and tagged.` + (duplicateOf ? ` NOTE: vendor+invoice number matches invoice #${duplicateOf}.` : '') + acceptedNote;
   ['oi-vendor','oi-invnum','oi-amount','oi-groupkey','oi-entered-amount'].forEach(id=> document.getElementById(id).value='');
   document.getElementById('oi-preview').innerHTML=''; document.getElementById('oi-dispute-draft-wrap').style.display='none';
   await loadOtherInvoices(); await loadReviewQueue();
@@ -1680,24 +1698,13 @@ function invoiceCardHTML(inv){
       <div class="meta">${(inv.invoice_tags||[]).slice(0,20).map(t=>`<span class="chip">${HEADER_LABEL[t.cost_header]||t.cost_header} · ${t.group_type}:${t.group_key}</span>`).join('')}${tagCount>20?` <span class="small">…and ${tagCount-20} more</span>`:''}</div>
       <div class="row-actions">
         <button class="btn secondary btn-sm act-view-detail">View detail (line by line)</button>
-        ${inv.status==='PENDING_REVIEW' && tagCount===1 ? `<button class="btn teal btn-sm act-accept-tag" data-tag="${inv.invoice_tags[0].id}">Accept</button><button class="btn amber btn-sm act-dispute-tag" data-tag="${inv.invoice_tags[0].id}">Flag for dispute</button>` : ''}
-        ${lockedTags.length>1 ? `<button class="btn teal btn-sm act-approve-invoice" data-inv="${inv.id}">Approve entire invoice (${lockedTags.length} line${lockedTags.length===1?'':'s'})</button>` : ''}
+        ${inv.status==='PENDING_REVIEW' && tagCount===1 ? `<button class="btn amber btn-sm act-dispute-tag" data-tag="${inv.invoice_tags[0].id}">Flag for dispute</button>` : ''}
       </div>
       <div class="detail-box" id="detail-${inv.id}" style="display:none;"></div>
     </div>`;
 }
 function wireInvoiceCardActions(scope){
   scope.querySelectorAll('.act-view-detail').forEach(b=>b.addEventListener('click', e=> toggleInvoiceDetail(e.target.closest('.invcard').dataset.inv)));
-  scope.querySelectorAll('.act-accept-tag').forEach(b=>b.addEventListener('click', e=> acceptTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
-  // Approve straight from the card — no need to open View detail first. Pulls the raw
-  // locked tags directly from what's already loaded (no extra fetch) and runs them
-  // through the same fast bulkAcceptTags path used everywhere else.
-  scope.querySelectorAll('.act-approve-invoice').forEach(b=>b.addEventListener('click', async e=>{
-    const invId = e.target.dataset.inv;
-    const { data: inv } = await sbClient.from('invoices').select('*, invoice_tags(*)').eq('id', invId).single();
-    const lockedTags = (inv.invoice_tags||[]).filter(t=>t.status==='LOCKED');
-    await bulkAcceptTags(invId, lockedTags);
-  }));
   scope.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, e.target.closest('.invcard').dataset.inv)));
 }
 const DETAIL_SNAPSHOT_CACHE = {}; // invoiceId -> tagSummaries computed when detail was opened — Export and Accept both read from this within one session, so they can never silently diverge from a live re-query in between.
@@ -1712,7 +1719,6 @@ async function toggleInvoiceDetail(invoiceId){
     try{ const {data} = await sbClient.storage.from('invoice-documents').createSignedUrl(inv.source_file_path, 3600); if(data?.signedUrl) docLink = `<a href="${data.signedUrl}" target="_blank" class="small">Open source document</a><br>`; }catch(e){}
   }
   const lockedTags = tagSummaries.filter(t=>t.tag.status==='LOCKED');
-  const acceptableCount = lockedTags.filter(t=>t.summary.shipmentIds.length>0).length;
   const totalProv = tagSummaries.reduce((s,t)=>s+t.summary.sum,0), totalAct = tagSummaries.reduce((s,t)=>s+t.actual,0);
   let html = docLink + (isMultiLob?`<div class="note warn">Spans multiple LOBs: ${lobs.join(', ')}</div>`:'')
     + (tagSummaries.length>1 ? `<div class="ledgerstrip" style="margin-bottom:8px;"><div class="cell"><div class="lab">Total provisional (all lines)</div><div class="val">${fmt(totalProv)}</div></div><div class="cell"><div class="lab">Total invoiced (all lines)</div><div class="val">${fmt(totalAct)}</div></div><div class="cell"><div class="lab">Total variance</div><div class="val">${fmt(totalAct-totalProv)}</div></div></div>` : '')
@@ -1722,9 +1728,7 @@ async function toggleInvoiceDetail(invoiceId){
     html += `<div class="note" style="background:#f4f8f7;">
       <label style="display:block;"><input type="checkbox" id="bulk-select-all-${invoiceId}"> <b>Select all ${lockedTags.length} still-open line(s)</b></label>
       <div class="row-actions" style="margin-top:6px;">
-        <button class="btn teal btn-sm bulk-accept-selected" data-inv="${invoiceId}">Accept selected</button>
         <button class="btn amber btn-sm bulk-dispute-selected" data-inv="${invoiceId}">Flag selected for dispute</button>
-        <button class="btn teal btn-sm bulk-accept-invoice" data-inv="${invoiceId}">Accept entire invoice (${acceptableCount} clean line${acceptableCount===1?'':'s'}${acceptableCount<lockedTags.length?`, skips ${lockedTags.length-acceptableCount} with zero matches`:''})</button>
       </div>
     </div>`;
   }
@@ -1739,25 +1743,19 @@ async function toggleInvoiceDetail(invoiceId){
       ${zeroMatch ? `<div class="note err">No shipments matched this group key — cannot accept until this resolves. Check the group key against the shipment master (e.g. run a lookup for this exact MAWB in Shipment Lookup).</div>` : ''}
       <div class="row-actions">
         ${t.summary.shipmentIds.length>1 ? `<button class="btn secondary btn-sm act-export-alloc" data-tag="${t.tag.id}">Export allocation (Excel)</button>` : ''}
-        ${t.tag.status==='LOCKED' ? `<button class="btn teal btn-sm act-accept-tag" data-tag="${t.tag.id}" ${zeroMatch?'disabled':''}>Accept this line</button><button class="btn amber btn-sm act-dispute-tag" data-tag="${t.tag.id}">Flag this line for dispute</button>` : ''}
+        ${t.tag.status==='LOCKED' ? `<button class="btn amber btn-sm act-dispute-tag" data-tag="${t.tag.id}">Flag this line for dispute</button>` : ''}
       </div></div>`;
   });
   const { data: actions } = await sbClient.from('approval_actions').select('*').eq('invoice_id', invoiceId).order('created_at');
   if(actions && actions.length) html += `<div class="small" style="margin-top:6px;"><b>Action log:</b><br>` + actions.map(a=>`${a.action}${a.reason?(' — '+a.reason):''} (${new Date(a.created_at).toLocaleString()})`).join('<br>') + `</div>`;
   slot.innerHTML = html;
-  slot.querySelectorAll('.act-accept-tag').forEach(b=>b.addEventListener('click', e=> acceptTag(e.target.dataset.tag, invoiceId)));
   slot.querySelectorAll('.act-dispute-tag').forEach(b=>b.addEventListener('click', e=> disputeTag(e.target.dataset.tag, invoiceId)));
   slot.querySelectorAll('.act-export-alloc').forEach(b=>b.addEventListener('click', e=> exportTagAllocation(e.target.dataset.tag, DETAIL_SNAPSHOT_CACHE[invoiceId])));
   slot.querySelectorAll('.act-cancel-invoice').forEach(b=>b.addEventListener('click', e=> cancelInvoice(e.target.dataset.inv)));
-  const tagById = {}; tagSummaries.forEach(t=> tagById[t.tag.id] = t.tag);
   const selectAllBox = document.getElementById(`bulk-select-all-${invoiceId}`);
   if(selectAllBox) selectAllBox.addEventListener('change', e=>{ slot.querySelectorAll('.bulk-line-check').forEach(c=>c.checked = e.target.checked); });
-  const bulkAccept = slot.querySelector('.bulk-accept-selected');
-  if(bulkAccept) bulkAccept.addEventListener('click', ()=> bulkAcceptTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>tagById[c.dataset.tag]).filter(Boolean)));
   const bulkDispute = slot.querySelector('.bulk-dispute-selected');
   if(bulkDispute) bulkDispute.addEventListener('click', ()=> bulkActOnTags(invoiceId, [...slot.querySelectorAll('.bulk-line-check:checked')].map(c=>c.dataset.tag), 'dispute'));
-  const bulkAll = slot.querySelector('.bulk-accept-invoice');
-  if(bulkAll) bulkAll.addEventListener('click', ()=> bulkAcceptTags(invoiceId, lockedTags.filter(t=>t.summary.shipmentIds.length>0).map(t=>t.tag)));
 }
 // True bulk accept for SHIPMENT-grain lines (one shipment per group, e.g. Aggregation) —
 // this is what actually fixes "7,075 lines takes ages": no apportionment math is needed for
@@ -1765,11 +1763,9 @@ async function toggleInvoiceDetail(invoiceId){
 // of batched queries and a handful of chunked writes, not one DB round-trip per line.
 // MAWB-grain lines can genuinely span many shipments and still need the real per-line
 // resolution — those run with bounded concurrency instead, same as the detail-view fetch.
-async function bulkAcceptTags(invoiceId, tags){
-  if(!tags.length){ alert('Nothing selected.'); return; }
+async function bulkAcceptTagsSilent(invoiceId, tags){
+  if(!tags.length) return {done:0, failed:0, alreadyDone:0, failureReasons:[]};
   const { data: inv } = await sbClient.from('invoices').select('duplicate_of_invoice_id, entry_date, invoice_date').eq('id', invoiceId).single();
-  const dupeWarning = inv.duplicate_of_invoice_id ? ` This invoice is flagged as a possible duplicate of #${inv.duplicate_of_invoice_id} — confirm you've checked that before proceeding.` : '';
-  if(!confirm(`Accept ${tags.length} line(s)? This cannot be undone once started.${dupeWarning}`)) return;
   const ledgerDate = inv.entry_date || inv.invoice_date || todayISO();
   const shipmentTags = tags.filter(t=>t.group_type==='SHIPMENT');
   const otherTags = tags.filter(t=>t.group_type!=='SHIPMENT');
@@ -1835,16 +1831,9 @@ async function bulkAcceptTags(invoiceId, tags){
     }
   }
   await checkAndFinalizeInvoiceStatus(invoiceId);
-  let msg = `Done: ${done} succeeded${failed?`, ${failed} failed`:''}.` + (alreadyDone ? ` (${alreadyDone} of those were already reversed from a prior attempt — only their stuck status was corrected, nothing financial was re-written.)` : '');
-  if(failureReasons.length){
-    const uniqueReasons = [...new Set(failureReasons)];
-    msg += `\n\nFailure reason(s):\n` + uniqueReasons.slice(0,5).map(r=>`• ${r}`).join('\n') + (uniqueReasons.length>5 ? `\n…and ${uniqueReasons.length-5} more distinct reason(s) — check console for the full list.` : '');
-    console.error(`bulkAcceptTags: ${failed} failure(s) for invoice ${invoiceId}:`, failureReasons);
-  }
-  alert(msg);
+  if(failureReasons.length) console.error(`bulkAcceptTagsSilent: ${failed} failure(s) for invoice ${invoiceId}:`, failureReasons);
   delete DETAIL_SNAPSHOT_CACHE[invoiceId];
-  await loadOtherInvoices(); await loadReviewQueue();
-  const slot = document.getElementById('detail-'+invoiceId); if(slot){ slot.style.display='none'; toggleInvoiceDetail(invoiceId); }
+  return {done, failed, alreadyDone, failureReasons};
 }
 // Bulk DISPUTE (unchanged, one line at a time) — disputing doesn't have the same batching
 // opportunity, since each line's dispute text/reason is meaningfully per-line.
